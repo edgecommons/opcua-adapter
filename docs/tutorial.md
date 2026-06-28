@@ -8,9 +8,9 @@ expected output is shown so you know you are on track.
 By the end you will have seen a `SouthboundTagUpdate` message, performed an on-demand read, and
 written a value back to the server.
 
-> This is a lesson, not a reference. We make a few choices for you and explain little — the
-> [explanation](explanation.md) covers the *why*, and the [how-to guides](how-to-guides.md) cover
-> variations.
+> This is a guided walkthrough — it makes a few choices for you and keeps explanation brief. For the
+> *why* behind each step, see the [explanation](explanation.md); for variations, see the
+> [how-to guides](how-to-guides.md).
 
 ## Prerequisites
 

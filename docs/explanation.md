@@ -1,9 +1,8 @@
 # Explanation — How the Adapter Works and Why
 
-This document is for understanding, not for looking things up or following steps. It explains the
-ideas behind the adapter so that the configuration options and message interface make sense as a
-whole. If you only need a value or a procedure, use the [reference](reference/) or the
-[how-to guides](how-to-guides.md) instead.
+This page explains the ideas behind the adapter so that the configuration options and message
+interface make sense as a whole. If you only need a specific value or a step-by-step procedure, the
+[reference](reference/) and the [how-to guides](how-to-guides.md) are quicker.
 
 ## What the adapter is for
 

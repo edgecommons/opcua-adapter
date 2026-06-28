@@ -1,9 +1,8 @@
 # How-to Guides
 
-Goal-oriented recipes for specific tasks. Each assumes you already have the adapter building and
-running (see the [tutorial](tutorial.md)) and know what you want to achieve. For the concepts behind
-these steps, see [explanation.md](explanation.md); for exhaustive option lists, see
-[reference/](reference/).
+Recipes for specific tasks. Each assumes you already have the adapter building and running (see the
+[tutorial](tutorial.md)). For the concepts behind these steps, see [explanation.md](explanation.md);
+for exhaustive option lists, see [reference/](reference/).
 
 ---
 

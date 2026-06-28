@@ -1,7 +1,7 @@
 # Reference — Configuration
 
-Complete, lookup-oriented reference for every configuration option. For *why* these settings exist
-and how they interact, read [explanation.md](../explanation.md); for task recipes, see the
+Complete reference for every configuration option. For *why* these settings exist and how they
+interact, read [explanation.md](../explanation.md); for task recipes, see the
 [how-to guides](../how-to-guides.md).
 
 ## Config source
