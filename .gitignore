@@ -4,5 +4,6 @@ build
 **.DS_STORE
 **.DS_Store
 *.iml
-target/validation/certs/
+target/
+validation/certs/
 validation/pki/
