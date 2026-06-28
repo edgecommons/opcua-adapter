@@ -47,17 +47,25 @@ declared dimension.
 Values the contract does not model as a number/boolean/string/array/datetime fall back to their string
 form on read and are **rejected on write** (the entry is skipped with a logged warning; the rest of a
 batch proceeds). Key on `tag.id` / `tag.address` for the native handle if you need to interpret them.
+The string is a best-effort rendering — **do not parse it**; its exact form is implementation/version
+dependent.
 
-| OPC UA type | Read — on-wire JSON | Write |
-|-------------|---------------------|-------|
-| `ByteString`                | string (opaque)             | ✗ |
-| `Guid`                      | string (UUID)               | ✗ |
-| `XmlElement`                | string                      | ✗ |
-| `NodeId` / `ExpandedNodeId` | string                      | ✗ |
-| `QualifiedName` / `LocalizedText` | string                | ✗ |
-| `StatusCode`                | string                      | ✗ |
-| Structure (`ExtensionObject`) | string (debug form)       | ✗ |
-| `Variant` / `DataValue` / `DiagnosticInfo` | string       | ✗ |
+| OPC UA type | Read — on-wire JSON (example) | Write |
+|-------------|-------------------------------|-------|
+| `Guid`                      | string — the UUID, e.g. `12345678-1234-5678-1234-567812345678` | ✗ |
+| `ByteString`                | string, e.g. `ByteString[bytes=01020304]`        | ✗ |
+| `NodeId` / `ExpandedNodeId` | string, e.g. `NodeId{ns=2, id=SomeTag}`          | ✗ |
+| `LocalizedText`             | string, e.g. `LocalizedText[locale=null, text=hello]` | ✗ |
+| `QualifiedName`             | string, e.g. `QualifiedName[namespaceIndex=2, name=qn]` | ✗ |
+| `StatusCode`                | string, e.g. `StatusCode[name=Good, value=0x00000000, quality=good]` | ✗ |
+| `XmlElement`                | string, e.g. `XmlElement[fragment=<a>x</a>]`     | ✗ |
+| Structure (`ExtensionObject`) | string (debug form)                            | ✗ |
+| `Variant` / `DataValue` / `DiagnosticInfo` | string                            | ✗ |
+
+The seven scalar pass-through rows are **verified end-to-end** against asyncua
+(`validation/validate_passthrough.py`): each reads as the string shown and a write attempt is skipped,
+leaving the value unchanged. The `ExtensionObject` (structure) row is confirmed via KEP's
+`_System.ServerStatus`.
 
 ## Notes
 

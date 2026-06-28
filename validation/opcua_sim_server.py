@@ -10,6 +10,7 @@ Endpoint: opc.tcp://localhost:4840/
 """
 import asyncio
 import math
+import uuid
 from datetime import datetime, timezone
 
 from asyncua import Server, ua
@@ -39,7 +40,25 @@ async def main():
                                   datetime(2020, 1, 1, tzinfo=timezone.utc), ua.VariantType.DateTime)
     await dtrw.set_writable(True)
 
-    print("[sim] starting on opc.tcp://localhost:4840/ (nodes: Sine1, Sine2, Counter, Setpoint, DateTimeRW)", flush=True)
+    # Pass-through types: the contract has no JSON model for these, so the adapter renders them as a
+    # string on read and rejects writes. Made writable here so a *skipped* write is observable
+    # (the value stays unchanged). Folder: Types/.
+    types = await server.nodes.objects.add_folder(ua.NodeId("Types", idx), ua.QualifiedName("Types", idx))
+    passthrough = [
+        ("ByteStringNode", b"\x01\x02\x03\x04", ua.VariantType.ByteString),
+        ("GuidNode", uuid.UUID("12345678-1234-5678-1234-567812345678"), ua.VariantType.Guid),
+        ("NodeIdNode", ua.NodeId("SomeTag", idx), ua.VariantType.NodeId),
+        ("LocalizedTextNode", ua.LocalizedText("hello"), ua.VariantType.LocalizedText),
+        ("QualifiedNameNode", ua.QualifiedName("qn", idx), ua.VariantType.QualifiedName),
+        ("StatusCodeNode", ua.StatusCode(0), ua.VariantType.StatusCode),
+        ("XmlElementNode", ua.XmlElement("<a>x</a>"), ua.VariantType.XmlElement),
+    ]
+    for name, val, vt in passthrough:
+        node = await types.add_variable(ua.NodeId(name, idx), ua.QualifiedName(name, idx), val, vt)
+        await node.set_writable(True)
+
+    print("[sim] starting on opc.tcp://localhost:4840/ "
+          "(nodes: Sine1, Sine2, Counter, Setpoint, DateTimeRW, Types/*)", flush=True)
     async with server:
         i = 0
         while True:
