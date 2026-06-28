@@ -133,6 +133,16 @@ secret is committed. The writable type tags use the Simulator's **K** holding re
 registers free-run, so written values wouldn't stick. The suite subscribes by topic **prefix**
 (`southbound/#`, `ggtest/#`, `metrics/#`); the local EMQX does not honor a bare `#`.
 
+**DateTime write** is validated against the **asyncua sim**, not KEP — KEP's Simulator rejects the
+Date tag type, so it has no writable DateTime node. The sim exposes a writable `DateTimeRW`:
+
+```bash
+python validation/opcua_sim_server.py &
+java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
+     validation/messaging-local.json -c FILE validation/config.json -t sim-thing &
+python validation/validate_sim_datetime.py     # DateTime read (ISO) + write round-trip; ALL PASS
+```
+
 ## Notes
 
 - `validation/certs/` and `validation/pki/` are generated and **gitignored** — never commit keys.
