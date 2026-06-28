@@ -12,12 +12,14 @@ import org.eclipse.milo.opcua.sdk.client.subscriptions.OpcUaMonitoredItem;
 import org.eclipse.milo.opcua.sdk.client.subscriptions.OpcUaSubscription;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.eclipse.milo.opcua.stack.core.types.builtin.StatusCode;
+import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UShort;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.DataChangeTrigger;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.DeadbandType;
 import org.eclipse.milo.opcua.stack.core.types.structured.DataChangeFilter;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +32,10 @@ import static org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.
  * Creates and maintains the OPC UA subscriptions for one device: matches address-space nodes to the
  * configured include/exclude tag specs, creates monitored items (with deadband), and routes value
  * changes to the {@link TagUpdatePublisher}. Re-establishes a subscription on transfer failure.
+ *
+ * <p>A tag spec selects its namespace by URI (resolved to the server's current index from the live
+ * namespace table) or by a literal index. Resolution happens here, each time subscriptions are built,
+ * so a server that renumbers between connections is picked up automatically.
  */
 public class SubscriptionManager {
 
@@ -42,7 +48,7 @@ public class SubscriptionManager {
     private final ClientMetrics counters;
 
     private final Map<OpcUaSubscription, SubscriptionSpec> subscriptions = new HashMap<>();
-    private final Map<String, TagSpec> resolvedTags = new ConcurrentHashMap<>();
+    private final Map<String, ResolvedTag> resolvedTags = new ConcurrentHashMap<>();
 
     public SubscriptionManager(OpcUaClient client, ServerConfiguration config,
                                Map<NodeId, UaVariableNode> allNodes,
@@ -54,7 +60,7 @@ public class SubscriptionManager {
         this.counters = counters;
     }
 
-    public Map<String, TagSpec> getResolvedTags() {
+    public Map<String, ResolvedTag> getResolvedTags() {
         return resolvedTags;
     }
 
@@ -97,7 +103,7 @@ public class SubscriptionManager {
                     publisher.offer(node, tagSpec, value);
                 });
                 items.add(item);
-                resolvedTags.put(node.getNodeId().getIdentifier().toString(), tagSpec);
+                resolvedTags.put(node.getNodeId().getIdentifier().toString(), new ResolvedTag(node.getNodeId(), tagSpec));
             });
 
             subscription.addMonitoredItems(items);
@@ -123,13 +129,19 @@ public class SubscriptionManager {
     }
 
     private Map<UaVariableNode, TagSpec> filter(SubscriptionSpec spec) {
+        Map<TagSpec, Integer> includeNs = resolveNamespaces(spec.getIncludeSpec().getTagSpecs());
+        Map<TagSpec, Integer> excludeNs = spec.getExcludeSpec() != null
+                ? resolveNamespaces(spec.getExcludeSpec().getTagSpecs())
+                : new IdentityHashMap<>();
+
         Map<UaVariableNode, TagSpec> matching = new LinkedHashMap<>();
         for (UaVariableNode node : allNodes.values()) {
-            TagSpec include = matchTag(node, spec.getIncludeSpec().getTagSpecs(), true);
+            TagSpec include = matchTag(node, spec.getIncludeSpec().getTagSpecs(), includeNs, true);
             if (include == null) {
                 continue;
             }
-            if (spec.getExcludeSpec() != null && matchTag(node, spec.getExcludeSpec().getTagSpecs(), false) != null) {
+            if (spec.getExcludeSpec() != null
+                    && matchTag(node, spec.getExcludeSpec().getTagSpecs(), excludeNs, false) != null) {
                 continue;
             }
             matching.put(node, include);
@@ -137,15 +149,40 @@ public class SubscriptionManager {
         return matching;
     }
 
-    /** Match a node against tag specs by namespace + regex over nodeId / browseName / displayName. */
-    private TagSpec matchTag(UaVariableNode node, List<TagSpec> specs, boolean matchNames) {
+    /**
+     * Resolve each tag spec's namespace to an effective index: a {@code namespaceUri} is looked up in
+     * the server's current namespace table; otherwise the literal {@code namespace} is used. An
+     * unresolved URI maps to {@code -1} (the matcher is skipped, with a warning).
+     */
+    private Map<TagSpec, Integer> resolveNamespaces(List<TagSpec> specs) {
+        Map<TagSpec, Integer> result = new IdentityHashMap<>();
+        for (TagSpec spec : specs) {
+            int ns;
+            if (spec.getNamespaceUri() != null) {
+                UShort idx = client.getNamespaceTable().getIndex(spec.getNamespaceUri());
+                ns = idx != null ? idx.intValue() : -1;
+                if (ns < 0) {
+                    LOGGER.warn("[{}] namespaceUri '{}' is not in the server's namespace table; matcher skipped",
+                            config.getId(), spec.getNamespaceUri());
+                }
+            } else {
+                ns = spec.getNamespace();
+            }
+            result.put(spec, ns);
+        }
+        return result;
+    }
+
+    /** Match a node against tag specs by resolved namespace index + regex over nodeId / browseName / displayName. */
+    private TagSpec matchTag(UaVariableNode node, List<TagSpec> specs, Map<TagSpec, Integer> nsBySpec, boolean matchNames) {
         String idStr = node.getNodeId().getIdentifier().toString();
         String browseName = node.getBrowseName() != null && node.getBrowseName().getName() != null
                 ? node.getBrowseName().getName() : "";
         String displayName = node.getDisplayName() != null && node.getDisplayName().getText() != null
                 ? node.getDisplayName().getText() : "";
         for (TagSpec spec : specs) {
-            if (!node.getNodeId().getNamespaceIndex().equals(ushort(spec.getNamespace()))) {
+            int ns = nsBySpec.getOrDefault(spec, -1);
+            if (ns < 0 || !node.getNodeId().getNamespaceIndex().equals(ushort(ns))) {
                 continue;
             }
             String regex = spec.getMatch();

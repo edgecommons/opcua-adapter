@@ -22,7 +22,7 @@
           {
             "id": "sines",
             "include": [
-              { "namespace": 2, "match": "Sine.*", "samplingRateMs": 250, "queueSize": 50,
+              { "namespaceUri": "urn:ggcommons:sim", "match": "Sine.*", "samplingRateMs": 250, "queueSize": 50,
                 "deadband": { "type": "None", "value": 0.0 } }
             ],
             "exclude": []

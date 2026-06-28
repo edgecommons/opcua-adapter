@@ -51,24 +51,28 @@ incomplete. See the [security model](explanation.md#the-security-model).
 
 **Goal:** subscribe to a precise set of nodes.
 
-Add `include` matchers (and optional `exclude` matchers) to a subscription. Pin the namespace and
-match the node with a Java regex:
+Add `include` matchers (and optional `exclude` matchers) to a subscription. Identify the namespace by
+its URI and match the node with a Java regex:
 
 ```jsonc
 "subscriptions": [
   {
     "id": "process",
-    "include": [ { "namespace": 2, "match": "^Channel1\\.Device1\\.(Temp|Pressure)\\b.*" } ],
-    "exclude": [ { "namespace": 2, "match": "\\.Diagnostics\\." } ]
+    "include": [ { "namespaceUri": "urn:kepware:KEPServerEX", "match": "^Channel1\\.Device1\\.(Temp|Pressure)\\b.*" } ],
+    "exclude": [ { "namespaceUri": "urn:kepware:KEPServerEX", "match": "\\.Diagnostics\\." } ]
   }
 ]
 ```
 
+- **Prefer `namespaceUri` over a literal `namespace` index.** The URI is stable; the index can change
+  between servers and across restarts. The adapter resolves the URI to the current index at connect
+  time (see [explanation](explanation.md#addressing-tags-and-a-trap)). Use a literal `namespace` only
+  for servers you know to be stable.
 - Anchor patterns (`^…`) for exact prefixes and escape literal dots (`\\.`) in JSON.
 - `include` matches a node's **identifier, browse name, or display name**; `exclude` matches the
   **identifier only** — write exclusions against the identifier.
-- Verify what actually resolved with the `subscriptions` control query (namespace indexes can shift —
-  see [explanation](explanation.md#addressing-tags-and-a-trap)).
+- Verify what actually resolved with the `subscriptions` control query — it reports the resolved index
+  and URI for each tag.
 
 ---
 

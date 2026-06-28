@@ -130,9 +130,15 @@ identifier with a regular expression.
 
 The trap is that **namespace indexes are not stable.** A server publishes a namespace *table* mapping
 URIs to indexes, and that mapping can change between servers and even across a restart of the same
-server. Because matching is by index, a configuration that works today can silently match nothing
-tomorrow if the server renumbers. When in doubt, ask the adapter what it actually resolved (the
-`subscriptions` control query) rather than trusting that namespace `2` is permanent.
+server. The **namespace URI is the stable identity**; the index is only a volatile handle into the
+server's current table.
+
+So configure tags by **`namespaceUri`** rather than a literal index. At connect time the adapter reads
+the server's namespace table and resolves each URI to its current index, re-resolving whenever it
+rebuilds subscriptions — so a server that renumbers after a restart is followed automatically. A
+literal `namespace` index is still accepted as a fallback for servers you know to be stable. If a
+configured URI is not present on the server, that matcher is skipped with a warning, and the
+`subscriptions` control query shows exactly what resolved.
 
 There is also an asymmetry worth internalizing: an **include** matcher tests its regex against a
 node's identifier, browse name, *and* display name, while an **exclude** matcher tests only the
@@ -151,8 +157,9 @@ Two design choices in that contract are worth calling out. First, **quality is n
 has a rich space of status codes; the contract collapses them to `GOOD`, `BAD`, or `UNCERTAIN` so
 consumers can make decisions without an OPC UA lookup table, while preserving the native code in
 `qualityRaw` for diagnostics. Second, **identity is split** into a canonical, stable `tag.id` that
-consumers should key on and a protocol-native `address` (`{ns, nodeId}`) that round-trips back to the
-device for reads and writes.
+consumers should key on and a protocol-native `address` (`{ns, namespaceUri, nodeId}`) that
+round-trips back to the device for reads and writes. The address reports the namespace **URI**
+alongside the index, so the round-trip identity does not depend on a volatile index either.
 
 ## The security model
 

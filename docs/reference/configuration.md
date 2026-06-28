@@ -118,7 +118,8 @@ One of three sources (`source`):
 
 | Key | Type | Default | Definition |
 |-----|------|---------|-----------|
-| `namespace` | number | `0` | OPC UA namespace index; matched exactly. |
+| `namespaceUri` | string | — | OPC UA namespace **URI** (preferred). Resolved to the server's current index at runtime; stable across servers and restarts. If the URI is absent on the server, the matcher is skipped (with a warning). |
+| `namespace` | number | `0` | Literal namespace index; used only when `namespaceUri` is absent. |
 | `match` | string (regex) | `".*"` | Java regex. **Include** matches identifier, browse name, or display name. **Exclude** matches the identifier only. |
 | `topic` | string (template) | inherits `publish.topic` | Per-tag publish-topic override (include). |
 | `samplingRateMs` | number | instance default | Monitored-item sampling interval. |
@@ -172,10 +173,10 @@ setting.
             "id": "sines",
             "publishIntervalMs": 250,
             "include": [
-              { "namespace": 2, "match": "^Channel1\\.Device1\\..*",
+              { "namespaceUri": "urn:kepware:KEPServerEX", "match": "^Channel1\\.Device1\\..*",
                 "samplingRateMs": 250, "queueSize": 50, "deadband": { "type": "Absolute", "value": 0.5 } }
             ],
-            "exclude": [ { "namespace": 2, "match": "\\.Diagnostics\\." } ]
+            "exclude": [ { "namespaceUri": "urn:kepware:KEPServerEX", "match": "\\.Diagnostics\\." } ]
           }
         ]
       }

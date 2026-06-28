@@ -71,12 +71,16 @@ per `publish.batchMs`). Topic: the instance `publish.topic`, with `{tagId}` = th
   "tag": {
     "id": "ns=2;s=Channel1.Device1.Sine1",         // canonical, stable id
     "name": "Sine1",                                 // displayName, else browseName
-    "address": { "ns": 2, "nodeId": "Channel1.Device1.Sine1" }
+    "address": { "ns": 2, "namespaceUri": "urn:kepware:KEPServerEX", "nodeId": "Channel1.Device1.Sine1" }
   },
   "samples": [ { "value": 0.7071, "quality": "GOOD", "qualityRaw": "Good (0x00000000)",
                  "sourceTs": "2026-06-28T12:00:00.123Z", "serverTs": "2026-06-28T12:00:00.150Z" } ]
 }
 ```
+
+`tag.address` carries `ns` (the current namespace index), `namespaceUri` (the stable namespace
+identity, when resolvable), and `nodeId` (the native identifier). Key consumers on `tag.id` or on
+`namespaceUri` + `nodeId` rather than the bare index, which can change between servers or restarts.
 
 ### write (bus → adapter)
 
@@ -113,12 +117,13 @@ Reads arbitrary tags on demand. Request topic: `read.topic`.
 // reply: header.name = "SouthboundReadResult", published to reply_to
 "body": {
   "id": "kep1",
-  "reads": [ { "tag": { "id": "ns=2;s=…Counter", "address": { "ns": 2, "nodeId": "…Counter" } },
+  "reads": [ { "tag": { "id": "ns=2;s=…Counter", "address": { "ns": 2, "namespaceUri": "urn:kepware:KEPServerEX", "nodeId": "…Counter" } },
                "value": 17, "quality": "GOOD", "qualityRaw": "Good (0x00000000)",
                "sourceTs": "…", "serverTs": "…" } ]
 }
 ```
-`reads[i]` corresponds to `tags[i]`; each entry has the sample fields above plus its `tag`.
+`reads[i]` corresponds to `tags[i]`; each entry has the sample fields above plus its `tag`. Read and
+write requests address tags by `ns` (namespace index) + `tagId`.
 
 ## Control plane
 
@@ -141,9 +146,10 @@ lifetime.
 Request topic `…/control/subscriptions` (any body). Reply `header.name` = `subscriptions`:
 
 ```jsonc
-"body": { "id": "kep1", "tags": [ { "tagId": "…Sine1", "namespace": 2, "match": "^…Sine.*" } ] }
+"body": { "id": "kep1", "tags": [ { "tagId": "…Sine1", "namespace": 2, "namespaceUri": "urn:kepware:KEPServerEX", "match": "^…Sine.*" } ] }
 ```
-Lists the tags currently resolved/subscribed and the matcher that selected each.
+Lists the tags currently resolved/subscribed, the **resolved** namespace index and its URI, and the
+matcher that selected each.
 
 ### `southbound_health` (metric)
 

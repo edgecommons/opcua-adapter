@@ -8,7 +8,6 @@ import com.mbreissi.ggcommons.messaging.Message;
 import com.mbreissi.ggcommons.messaging.MessageBuilder;
 import com.mbreissi.ggcommons.messaging.MessagingClient;
 import com.mbreissi.opcua.opcuaadapter.opc.config.ServerConfiguration;
-import com.mbreissi.opcua.opcuaadapter.opc.config.TagSpec;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
@@ -40,11 +39,11 @@ public class CommandService {
     private final ServerConfiguration serverConfig;
     private final ClientMetrics counters;
     private final BooleanSupplier connected;
-    private final Supplier<Map<String, TagSpec>> resolvedTags;
+    private final Supplier<Map<String, ResolvedTag>> resolvedTags;
 
     public CommandService(OpcUaClient client, MessagingClient messaging, ConfigManager config,
                           ServerConfiguration serverConfig, ClientMetrics counters,
-                          BooleanSupplier connected, Supplier<Map<String, TagSpec>> resolvedTags) {
+                          BooleanSupplier connected, Supplier<Map<String, ResolvedTag>> resolvedTags) {
         this.client = client;
         this.messaging = messaging;
         this.config = config;
@@ -138,7 +137,7 @@ public class CommandService {
                 NodeId nodeId = nodeIds.get(i);
                 JsonObject tag = new JsonObject();
                 tag.addProperty("id", nodeId.toParseableString());
-                tag.add("address", ValueCodec.address(nodeId));
+                tag.add("address", ValueCodec.address(nodeId, client.getNamespaceTable()));
                 JsonObject read = ValueCodec.toSample(values.get(i));
                 read.add("tag", tag);
                 reads.add(read);
@@ -164,11 +163,16 @@ public class CommandService {
             JsonObject responsePayload = new JsonObject();
             responsePayload.addProperty("id", serverConfig.getId());
             JsonArray tags = new JsonArray();
-            resolvedTags.get().forEach((tagId, spec) -> {
+            resolvedTags.get().forEach((tagId, rt) -> {
                 JsonObject t = new JsonObject();
                 t.addProperty("tagId", tagId);
-                t.addProperty("namespace", spec.getNamespace());
-                t.addProperty("match", spec.getMatch());
+                int idx = rt.nodeId().getNamespaceIndex().intValue();
+                t.addProperty("namespace", idx);
+                String uri = client.getNamespaceTable().get(idx);
+                if (uri != null) {
+                    t.addProperty("namespaceUri", uri);
+                }
+                t.addProperty("match", rt.spec().getMatch());
                 tags.add(t);
             });
             responsePayload.add("tags", tags);

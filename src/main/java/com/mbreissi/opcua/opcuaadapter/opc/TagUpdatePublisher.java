@@ -9,6 +9,7 @@ import com.mbreissi.ggcommons.messaging.MessagingClient;
 import com.mbreissi.opcua.opcuaadapter.opc.config.ServerConfiguration;
 import com.mbreissi.opcua.opcuaadapter.opc.config.TagSpec;
 import org.eclipse.milo.opcua.sdk.client.nodes.UaVariableNode;
+import org.eclipse.milo.opcua.stack.core.NamespaceTable;
 import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
 
 import java.util.ArrayList;
@@ -28,12 +29,15 @@ public class TagUpdatePublisher {
     private final MessagingClient messaging;
     private final ConfigManager config;
     private final ServerConfiguration serverConfig;
+    private final NamespaceTable namespaceTable;
     private final Map<UaVariableNode, Buffer> pending = new ConcurrentHashMap<>();
 
-    public TagUpdatePublisher(MessagingClient messaging, ConfigManager config, ServerConfiguration serverConfig) {
+    public TagUpdatePublisher(MessagingClient messaging, ConfigManager config, ServerConfiguration serverConfig,
+                              NamespaceTable namespaceTable) {
         this.messaging = messaging;
         this.config = config;
         this.serverConfig = serverConfig;
+        this.namespaceTable = namespaceTable;
     }
 
     /** Offer a value change for a tag — buffered (batch) or published immediately. */
@@ -74,7 +78,7 @@ public class TagUpdatePublisher {
         JsonObject tag = new JsonObject();
         tag.addProperty("id", node.getNodeId().toParseableString());
         tag.addProperty("name", !displayName.isEmpty() ? displayName : browseName);
-        tag.add("address", ValueCodec.address(node.getNodeId()));
+        tag.add("address", ValueCodec.address(node.getNodeId(), namespaceTable));
 
         JsonArray samples = new JsonArray();
         for (DataValue value : values) {

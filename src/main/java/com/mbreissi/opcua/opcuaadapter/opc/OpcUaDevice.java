@@ -44,7 +44,7 @@ public class OpcUaDevice {
         Map<NodeId, UaVariableNode> allNodes = new AddressSpaceBrowser(client, config.getId()).browseAll();
 
         // 3. Northbound publisher + subscriptions feeding it.
-        TagUpdatePublisher publisher = new TagUpdatePublisher(messaging, configManager, config);
+        TagUpdatePublisher publisher = new TagUpdatePublisher(messaging, configManager, config, client.getNamespaceTable());
         SubscriptionManager subscriptions = new SubscriptionManager(client, config, allNodes, publisher, counters);
         subscriptions.createAll();
 

@@ -5,6 +5,7 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.eclipse.milo.opcua.stack.core.NamespaceTable;
 import org.eclipse.milo.opcua.stack.core.NodeIds;
 import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
 import org.eclipse.milo.opcua.stack.core.types.builtin.DateTime;
@@ -63,10 +64,19 @@ public final class ValueCodec {
         return sample;
     }
 
-    /** The protocol-native {@code address} object for a node id: {@code {ns, nodeId}}. */
-    public static JsonObject address(NodeId nodeId) {
+    /**
+     * The protocol-native {@code address} object for a node id: {@code {ns, namespaceUri?, nodeId}}.
+     * {@code namespaceUri} (the stable identity, resolved from the namespace table) is included when
+     * available so consumers are not tied to the volatile namespace index.
+     */
+    public static JsonObject address(NodeId nodeId, NamespaceTable namespaceTable) {
         JsonObject address = new JsonObject();
-        address.addProperty("ns", nodeId.getNamespaceIndex().intValue());
+        int ns = nodeId.getNamespaceIndex().intValue();
+        address.addProperty("ns", ns);
+        String uri = namespaceTable != null ? namespaceTable.get(ns) : null;
+        if (uri != null) {
+            address.addProperty("namespaceUri", uri);
+        }
         address.addProperty("nodeId", nodeId.getIdentifier().toString());
         return address;
     }
