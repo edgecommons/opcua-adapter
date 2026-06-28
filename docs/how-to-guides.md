@@ -47,6 +47,33 @@ incomplete. See the [security model](explanation.md#the-security-model).
 
 ---
 
+## Authenticate with a username and password
+
+**Goal:** connect to a server that requires a UserName identity token (e.g. KEPServerEX, whose
+endpoints — *including* the `None` one — reject anonymous logins by default).
+
+Add a `user` block to the instance `connection`. It is independent of `securityPolicy`, so it applies
+to a plaintext `None` channel and to a secured one alike:
+
+```jsonc
+"connection": {
+  "endpoint": "opc.tcp://host:49320",
+  "securityPolicy": "None",
+  "user": { "source": "vault", "secret": "opcua/kep1/login" }   // BasicAuth {username, password}
+}
+```
+
+For development you may inline the credentials — `"user": { "username": "…", "password": "…" }` —
+but **keep any config holding an inline password out of version control.** The vault form requires a
+`credentials` section; store the secret as `{ "username": "…", "password": "…" }`.
+
+The server validates the user against its own account store (KEPServerEX: **User Manager**) and
+applies that user's permissions. If the connection succeeds but a subscription resolves **zero** tags,
+the account likely lacks browse/read access to that part of the address space — grant it on the
+server. See [`connection.user`](reference/configuration.md#connectionuser).
+
+---
+
 ## Choose exactly which tags to publish
 
 **Goal:** subscribe to a precise set of nodes.

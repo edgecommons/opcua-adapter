@@ -60,10 +60,35 @@ These are overridden by an instance's own `defaults`.
 | `securityPolicy` | string | `"None"` | Milo `SecurityPolicy` name (`None`, `Basic256Sha256`, …). An unrecognized value falls back to `None` with a warning. |
 | `messageMode` | string | `"None"` | `MessageSecurityMode`: `None`, `Sign`, `SignAndEncrypt`. Under a secure policy, `None` is auto-upgraded to `SignAndEncrypt`. |
 | `applicationUri` | string | derived from cert SAN URI | Secure only. Must equal the client certificate's SubjectAltName URI. |
+| `user` | object | — | Optional UserName identity token (any policy). Inline or vault-backed — see below. |
 | `clientCertificate` | object | — | Secure only. Client identity source — see below. |
 | `trust` | object | — | Secure only. Server-trust settings — see below. |
 
-For `securityPolicy: "None"` only `endpoint` is required.
+For `securityPolicy: "None"` only `endpoint` is required (plus `user`, if the server demands one).
+
+#### `connection.user`
+
+Optional. Supplies a **UserName identity token**; without it the adapter connects **anonymously**.
+It is independent of channel security — a `None` (unencrypted) endpoint can still require a user
+token, as KEPServerEX does by default. On a `None` channel the password is encrypted with the
+server's endpoint certificate when the server's user-token policy requires it.
+
+| Form | Keys | Definition |
+|------|------|-----------|
+| inline | `username`, `password` | Credentials in the config. **Keep any config with an inline password out of version control.** |
+| vault | `source: "vault"`, `secret` | Reads a `BasicAuth` (`{username, password}`) from the credentials vault; requires a `credentials` section. |
+
+```jsonc
+"connection": {
+  "endpoint": "opc.tcp://host:49320",
+  "securityPolicy": "None",
+  "user": { "source": "vault", "secret": "opcua/kep1/login" }
+}
+```
+
+The server validates the user against its own account store (e.g. KEPServerEX's **User Manager**) and
+applies that user's authorization. An under-privileged account may see only part of the address space,
+so an over-restricted user can yield empty subscriptions even though the connection succeeds.
 
 #### `connection.clientCertificate`
 

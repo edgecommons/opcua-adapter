@@ -43,6 +43,15 @@ public class ConnectionInfo {
         return !"None".equalsIgnoreCase(securityPolicy);
     }
 
+    /**
+     * The optional {@code user} block carrying a UserName identity token, or {@code null} for
+     * anonymous. Either inline ({@code {username, password}}) or vault-backed
+     * ({@code {source:"vault", secret:"..."}}); resolved by the identity layer.
+     */
+    public JsonObject getUser() {
+        return raw.has("user") && raw.get("user").isJsonObject() ? raw.getAsJsonObject("user") : null;
+    }
+
     /** The raw connection JSON, for the security layer to read cert-source fields from. */
     public JsonObject raw() {
         return raw;

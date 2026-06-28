@@ -10,3 +10,6 @@ validation/pki/
 # Paho MQTT default file-persistence dirs (created when running the jar from the repo root)
 *-tcplocalhost*/
 *-ssllocalhost*/
+# Validation configs that carry inline credentials (never commit secrets)
+validation/config-kep-user.json
+validation/*-user.json

@@ -3,14 +3,15 @@ package com.mbreissi.opcua.opcuaadapter.opc;
 import com.mbreissi.ggcommons.credentials.CredentialService;
 import com.mbreissi.opcua.opcuaadapter.opc.config.ConnectionInfo;
 import com.mbreissi.opcua.opcuaadapter.opc.config.ServerConfiguration;
+import com.google.gson.JsonObject;
 import com.mbreissi.opcua.opcuaadapter.opc.security.ClientIdentity;
+import com.mbreissi.opcua.opcuaadapter.opc.security.IdentityProviders;
 import com.mbreissi.opcua.opcuaadapter.opc.security.Pem;
 import com.mbreissi.opcua.opcuaadapter.opc.security.SecurityConfig;
 import com.mbreissi.opcua.opcuaadapter.opc.security.TrustListBuilder;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
-import org.eclipse.milo.opcua.sdk.client.identity.AnonymousProvider;
 import org.eclipse.milo.opcua.stack.core.StatusCodes;
 import org.eclipse.milo.opcua.stack.core.UaException;
 import org.eclipse.milo.opcua.stack.core.security.DefaultClientCertificateValidator;
@@ -69,9 +70,12 @@ public class OpcUaConnection {
     }
 
     private OpcUaClient createClient(String endpoint, SecurityPolicy policy) throws Exception {
+        JsonObject user = config.getConnection().getUser();
         if (policy == SecurityPolicy.None) {
-            // Anonymous, no security. Lambda param types are inferred from the create() overload,
-            // which sidesteps importing the (package-moved) config/transport builder types.
+            // No channel security, but the server may still require a UserName token (e.g. KEPServerEX
+            // by default) -- identity comes from the optional connection.user block. Lambda param types
+            // are inferred from the create() overload, sidestepping the package-moved builder types.
+            LOGGER.info("[{}] identity: {} (policy=None)", config.getId(), IdentityProviders.describe(user));
             return OpcUaClient.create(
                     endpoint,
                     endpoints -> endpoints.stream()
@@ -81,7 +85,7 @@ public class OpcUaConnection {
                     cfg -> cfg
                             .setApplicationName(LocalizedText.english("GGCommons OPC UA Adapter"))
                             .setApplicationUri("urn:ggcommons:opcua:adapter")
-                            .setIdentityProvider(new AnonymousProvider()));
+                            .setIdentityProvider(IdentityProviders.from(user, credentials)));
         }
         // Secure channel (e.g. Basic256Sha256 / SignAndEncrypt): client cert/key from the configured
         // source (vault/file/pkcs11), server trust via the per-device PKI dir + optional pinned cert.
@@ -94,7 +98,8 @@ public class OpcUaConnection {
                         "client certificate has no SubjectAltName URI; set connection.applicationUri"));
         DefaultClientCertificateValidator validator = TrustListBuilder.build(sec.pkiDir(), sec.serverTrustAnchor());
         MessageSecurityMode mode = sec.messageMode();
-        LOGGER.info("[{}] secure connect: policy={} mode={} appUri={}", config.getId(), policy, mode, appUri);
+        LOGGER.info("[{}] secure connect: policy={} mode={} appUri={} identity={}",
+                config.getId(), policy, mode, appUri, IdentityProviders.describe(user));
         return OpcUaClient.create(
                 endpoint,
                 endpoints -> endpoints.stream()
@@ -108,7 +113,7 @@ public class OpcUaConnection {
                         .setCertificate(identity.certificate())
                         .setCertificateChain(identity.chain())
                         .setCertificateValidator(validator)
-                        .setIdentityProvider(new AnonymousProvider()));
+                        .setIdentityProvider(IdentityProviders.from(user, credentials)));
     }
 
     private SecurityPolicy parsePolicy(String name) {

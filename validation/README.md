@@ -42,6 +42,46 @@ python validation/validate.py                                  # ALL PASS expect
 | B | on-demand batch read (request/reply → `SouthboundReadResult`) |
 | C | batch write (Setpoint=42.5) confirmed by reading it back |
 
+## Live KEPServerEX smoke
+
+These run against a real KEPServerEX (no asyncua sim). First open the OPC UA port through the KEP
+host's firewall and note the endpoint (default `opc.tcp://<host>:49320`).
+
+**Discover** the server's endpoints, namespaces, and a sample of its tags (drives the config — no
+guessing):
+
+```bash
+python validation/kep_discover.py opc.tcp://<host>:49320
+```
+
+**Anonymous data plane** (requires a `None` endpoint + *Allow anonymous login* on KEP). `config-kep.json`
+subscribes to the built-in `_System._Time*` tags (which tick each second) by the stable namespace URI
+(`"Kepware Server"`):
+
+```bash
+java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
+     validation/messaging-local.json -c FILE validation/config-kep.json -t kep-thing &
+python validation/validate_kep.py            # subscribe + read-by-namespaceUri; ALL PASS
+```
+
+**UserName identity** (KEP rejects anonymous on every endpoint by default). Put credentials in the
+**gitignored** `validation/config-kep-user.json` (copy `config-kep.json`, add
+`connection.user: { "username": "…", "password": "…" }`):
+
+```bash
+java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
+     validation/messaging-local.json -c FILE validation/config-kep-user.json -t kep-thing &
+python validation/validate_kep_user.py       # data flows under the UserName identity; PASS
+```
+
+The server applies that user's authorization — an under-privileged account may browse only part of the
+address space (the `config-kep-user.json` here targets the world-readable ns=0 `ServerStatus` so it
+works regardless of tag-namespace permissions). KEP's `_System.*` tags are read-only, so the write
+phase needs a writable tag on a Channel/Device.
+
+> `validation/config-kep-user.json` and any `validation/*-user.json` are **gitignored** — they carry
+> inline credentials. Never commit them.
+
 ## Notes
 
 - `validation/certs/` and `validation/pki/` are generated and **gitignored** — never commit keys.
