@@ -1,0 +1,41 @@
+{
+  "_comment": "Template for the integration suite (validate_kep_suite.py). Copy to config-kep-suite.json (gitignored) and fill connection.user with a KEP UA account that has read/write. Drop 'user' for anonymous (write tests need write permission). Run validation/kep_setup.py first to create the GGCommonsTest channel.",
+  "tags": { "appId": "suite", "site": "lab", "shop": "s1", "line": "l1" },
+  "logging": { "level": "INFO" },
+  "metricEmission": {
+    "target": "messaging",
+    "targetConfig": { "topic": "metrics/{ThingName}/{ComponentName}" }
+  },
+  "component": {
+    "global": {
+      "defaults": { "publishIntervalMs": 500, "samplingRateMs": 200, "queueSize": 20 },
+      "healthThresholds": { "staleTagSecs": 30 }
+    },
+    "instances": [
+      {
+        "id": "suite",
+        "adapter": "opcua",
+        "connection": {
+          "endpoint": "opc.tcp://<kep-host>:49320",
+          "securityPolicy": "None",
+          "user": { "username": "<kep-ua-user>", "password": "<password>" }
+        },
+        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{tagId}", "batchMs": 0 },
+        "write": { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
+        "read": { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
+        "subscriptions": [
+          {
+            "id": "main",
+            "include": [
+              { "namespaceUri": "Kepware Server", "match": "^GGCommonsTest\\.Device1\\.LiveSine$", "topic": "ggtest/live/{tagId}", "samplingRateMs": 200, "queueSize": 20 },
+              { "namespaceUri": "Kepware Server", "match": "^GGCommonsTest\\.Device1\\..*", "samplingRateMs": 200, "queueSize": 20 }
+            ],
+            "exclude": [
+              { "namespaceUri": "Kepware Server", "match": "^GGCommonsTest\\.Device1\\.LiveRandom$" }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

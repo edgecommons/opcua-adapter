@@ -12,4 +12,6 @@ validation/pki/
 *-ssllocalhost*/
 # Validation configs that carry inline credentials (never commit secrets)
 validation/config-kep-user.json
+validation/config-kep-secure-user.json
+validation/config-kep-suite.json
 validation/*-user.json

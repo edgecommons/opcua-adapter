@@ -105,6 +105,34 @@ gitignored `validation/config-kep-secure-user.json` (the secure config plus `con
 > `validation/config-kep-user.json` and any `validation/*-user.json` are **gitignored** — they carry
 > inline credentials. Never commit them. The `certs/` and `pki/` dirs are gitignored too.
 
+## Integration suite (full data-type & feature matrix)
+
+`validate_kep_suite.py` is the broad suite: every adapter data type (read **and** write round-trip),
+changing values from simulator functions, and the adapter's features. It needs a dedicated channel of
+typed tags, created on the server via the KEP **Configuration REST API** (`kep_setup.py`).
+
+```bash
+# 1. create the GGCommonsTest channel/device/tags (Config-API account needs add+edit permission)
+KEP_API_USER=Administrator KEP_API_PASS=*** KEP_API_HOST=<host>:57512 python validation/kep_setup.py
+# 2. copy the template and set connection.user to a read/write KEP UA account
+cp validation/config-kep-suite.example.json validation/config-kep-suite.json   # edit connection.user
+# 3. run the adapter on it, then the suite
+java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
+     validation/messaging-local.json -c FILE validation/config-kep-suite.json -t suite-thing &
+python validation/validate_kep_suite.py        # 41 checks; ALL PASS
+```
+
+It verifies: each data type (Boolean, SByte, Byte, Int16/32/64, UInt16/32/64, Float, Double, String)
+on read and on write→read-back; changing values from `RAMP`/`SINE`/`USER` simulator functions;
+include/exclude filtering; per-tag topic override; batch read/write; `namespaceUri`-vs-index
+addressing; error handling (unresolvable URI omitted, missing node → `BAD`); the status/subscriptions
+control queries; the `southbound_health` metric; and quality normalization.
+
+`kep_setup.py` is idempotent (create-or-edit upsert) and reads credentials from the environment, so no
+secret is committed. The writable type tags use the Simulator's **K** holding registers — its **R**
+registers free-run, so written values wouldn't stick. The suite subscribes by topic **prefix**
+(`southbound/#`, `ggtest/#`, `metrics/#`); the local EMQX does not honor a bare `#`.
+
 ## Notes
 
 - `validation/certs/` and `validation/pki/` are generated and **gitignored** — never commit keys.
