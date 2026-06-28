@@ -61,6 +61,23 @@ LIVE_TAGS = [
     ("LiveBool",   "USER (1000,1,0)",                              1),
 ]
 
+# (name, address, TAG_DATA_TYPE)  -- read/write 4-element arrays (one per representative element type)
+ARRAY_TAGS = [
+    ("BoolArray",   "B0010 [4]", 21),   # Boolean[]
+    ("Int16Array",  "K0880 [4]", 24),   # Short[]
+    ("UInt16Array", "K0990 [4]", 25),   # Word[]
+    ("Int32Array",  "K0770 [4]", 26),   # Long[]
+    ("FloatArray",  "K0660 [4]", 28),   # Float[]
+    ("DoubleArray", "K0440 [4]", 29),   # Double[]
+    ("StringArray", "S0010 [4]", 20),   # String[]
+]
+
+# Date type (15). Best-effort: if the Simulator rejects a Date register, the suite still verifies
+# DateTime *read* against the built-in _System._DateTime.
+DATE_TAGS = [
+    ("DateTimeRW", "K1000", 15),
+]
+
 
 def api(method, path, body=None):
     data = json.dumps(body).encode() if body is not None else None
@@ -132,6 +149,13 @@ def main():
         st, action = upsert(parent, name, tag_body(name, addr, dtype, 0))
         print(f"  tag {name:10} {addr:42} dtype={dtype:<2} rw=0 -> [{st}] {action}")
         fail += st not in (200, 201)
+    for name, addr, dtype in ARRAY_TAGS:
+        st, action = upsert(parent, name, tag_body(name, addr, dtype, 1))
+        print(f"  tag {name:12} {addr:12} dtype={dtype:<2} rw=1 -> [{st}] {action}")
+        fail += st not in (200, 201)
+    for name, addr, dtype in DATE_TAGS:
+        st, action = upsert(parent, name, tag_body(name, addr, dtype, 1))
+        print(f"  tag {name:12} {addr:12} dtype={dtype:<2} rw=1 -> [{st}] {action}  (best-effort)")
 
     st, tags = api("GET", f"{parent}/tags")
     n = len(tags) if isinstance(tags, list) else "?"

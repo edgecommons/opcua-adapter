@@ -1,8 +1,10 @@
 package com.mbreissi.opcua.opcuaadapter.opc;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.milo.opcua.stack.core.NamespaceTable;
@@ -12,8 +14,13 @@ import org.eclipse.milo.opcua.stack.core.types.builtin.DateTime;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.eclipse.milo.opcua.stack.core.types.builtin.StatusCode;
 import org.eclipse.milo.opcua.stack.core.types.builtin.Variant;
+import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UByte;
+import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UInteger;
+import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.ULong;
+import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UShort;
 import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned;
 
+import java.lang.reflect.Array;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 
@@ -47,21 +54,42 @@ public final class ValueCodec {
     public static JsonObject toSample(DataValue value) {
         JsonObject sample = new JsonObject();
         Object v = value.getValue() != null ? value.getValue().getValue() : null;
-        if (v == null) {
-            sample.add("value", JsonNull.INSTANCE);
-        } else if (v instanceof Number) {
-            sample.addProperty("value", (Number) v);
-        } else if (v instanceof Boolean) {
-            sample.addProperty("value", (Boolean) v);
-        } else {
-            sample.addProperty("value", v.toString());
-        }
+        sample.add("value", encodeValue(v));
         StatusCode sc = value.getStatusCode();
         sample.addProperty("quality", normalizeQuality(sc));
         sample.addProperty("qualityRaw", sc != null ? sc.toString() : "null");
         sample.addProperty("sourceTs", value.getSourceTime() != null ? value.getSourceTime().getJavaInstant().toString() : null);
         sample.addProperty("serverTs", value.getServerTime() != null ? value.getServerTime().getJavaInstant().toString() : null);
         return sample;
+    }
+
+    /**
+     * Render an OPC UA value to JSON: numbers (incl. unsigned) and booleans as themselves, a
+     * {@link DateTime} as an ISO-8601 UTC string, an array element-wise (recursively), and anything
+     * else as its string form.
+     */
+    private static JsonElement encodeValue(Object v) {
+        if (v == null) {
+            return JsonNull.INSTANCE;
+        }
+        if (v instanceof Number) {
+            return new JsonPrimitive((Number) v);
+        }
+        if (v instanceof Boolean) {
+            return new JsonPrimitive((Boolean) v);
+        }
+        if (v instanceof DateTime) {
+            return new JsonPrimitive(((DateTime) v).getJavaInstant().toString());
+        }
+        if (v.getClass().isArray()) {
+            JsonArray arr = new JsonArray();
+            int n = Array.getLength(v);
+            for (int i = 0; i < n; i++) {
+                arr.add(encodeValue(Array.get(v, i)));
+            }
+            return arr;
+        }
+        return new JsonPrimitive(v.toString());
     }
 
     /**
@@ -81,9 +109,16 @@ public final class ValueCodec {
         return address;
     }
 
-    /** Coerce a JSON write value to a {@link Variant} of the node's data type, or {@code null} if unsupported. */
+    /**
+     * Coerce a JSON write value to a {@link Variant} of the node's data type, or {@code null} if
+     * unsupported. A JSON array is written as a typed OPC UA array of {@code targetType} (the node's
+     * element type); a scalar is written as that type. {@code DateTime} accepts an ISO-8601 string.
+     */
     public static Variant variantFromValue(NodeId targetType, JsonElement value) {
         try {
+            if (value != null && value.isJsonArray()) {
+                return arrayVariant(targetType, value.getAsJsonArray());
+            }
             if (targetType.equals(NodeIds.Boolean)) {
                 return new Variant(value.getAsBoolean());
             } else if (targetType.equals(NodeIds.SByte)) {
@@ -108,6 +143,8 @@ public final class ValueCodec {
                 return new Variant(value.getAsDouble());
             } else if (targetType.equals(NodeIds.String)) {
                 return new Variant(value.getAsString());
+            } else if (targetType.equals(NodeIds.DateTime)) {
+                return new Variant(parseDateTime(value.getAsString()));
             }
             LOGGER.warn("unsupported write target type {}", targetType);
             return null;
@@ -115,6 +152,70 @@ public final class ValueCodec {
             LOGGER.error("value coercion failed for type {}: {}", targetType, e.toString());
             return null;
         }
+    }
+
+    /** Build a typed OPC UA array {@link Variant} of {@code elementType} from a JSON array, or null. */
+    private static Variant arrayVariant(NodeId elementType, JsonArray a) {
+        int n = a.size();
+        if (elementType.equals(NodeIds.Boolean)) {
+            Boolean[] x = new Boolean[n];
+            for (int i = 0; i < n; i++) x[i] = a.get(i).getAsBoolean();
+            return new Variant(x);
+        } else if (elementType.equals(NodeIds.SByte)) {
+            Byte[] x = new Byte[n];
+            for (int i = 0; i < n; i++) x[i] = (byte) a.get(i).getAsInt();
+            return new Variant(x);
+        } else if (elementType.equals(NodeIds.Byte)) {
+            UByte[] x = new UByte[n];
+            for (int i = 0; i < n; i++) x[i] = Unsigned.ubyte(a.get(i).getAsInt());
+            return new Variant(x);
+        } else if (elementType.equals(NodeIds.Int16)) {
+            Short[] x = new Short[n];
+            for (int i = 0; i < n; i++) x[i] = a.get(i).getAsShort();
+            return new Variant(x);
+        } else if (elementType.equals(NodeIds.UInt16)) {
+            UShort[] x = new UShort[n];
+            for (int i = 0; i < n; i++) x[i] = Unsigned.ushort(a.get(i).getAsInt());
+            return new Variant(x);
+        } else if (elementType.equals(NodeIds.Int32)) {
+            Integer[] x = new Integer[n];
+            for (int i = 0; i < n; i++) x[i] = a.get(i).getAsInt();
+            return new Variant(x);
+        } else if (elementType.equals(NodeIds.UInt32)) {
+            UInteger[] x = new UInteger[n];
+            for (int i = 0; i < n; i++) x[i] = Unsigned.uint(a.get(i).getAsLong());
+            return new Variant(x);
+        } else if (elementType.equals(NodeIds.Int64)) {
+            Long[] x = new Long[n];
+            for (int i = 0; i < n; i++) x[i] = a.get(i).getAsLong();
+            return new Variant(x);
+        } else if (elementType.equals(NodeIds.UInt64)) {
+            ULong[] x = new ULong[n];
+            for (int i = 0; i < n; i++) x[i] = Unsigned.ulong(a.get(i).getAsLong());
+            return new Variant(x);
+        } else if (elementType.equals(NodeIds.Float)) {
+            Float[] x = new Float[n];
+            for (int i = 0; i < n; i++) x[i] = a.get(i).getAsFloat();
+            return new Variant(x);
+        } else if (elementType.equals(NodeIds.Double)) {
+            Double[] x = new Double[n];
+            for (int i = 0; i < n; i++) x[i] = a.get(i).getAsDouble();
+            return new Variant(x);
+        } else if (elementType.equals(NodeIds.String)) {
+            String[] x = new String[n];
+            for (int i = 0; i < n; i++) x[i] = a.get(i).getAsString();
+            return new Variant(x);
+        } else if (elementType.equals(NodeIds.DateTime)) {
+            DateTime[] x = new DateTime[n];
+            for (int i = 0; i < n; i++) x[i] = parseDateTime(a.get(i).getAsString());
+            return new Variant(x);
+        }
+        LOGGER.warn("unsupported write array element type {}", elementType);
+        return null;
+    }
+
+    private static DateTime parseDateTime(String iso) {
+        return new DateTime(Instant.from(DateTimeFormatter.ISO_INSTANT.parse(iso)));
     }
 
     public static StatusCode statusFromString(String s) {

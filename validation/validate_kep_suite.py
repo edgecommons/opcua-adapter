@@ -200,6 +200,54 @@ def main():
             ok = gv is not None and int(gv) == exp
         check("types/write", name, ok, f"wrote {exp!r} -> read {gv!r} ({e.get('quality')})")
 
+    # --- arrays: read shape + write round-trip (element-wise) -----------------------------
+    ARRAYS = {
+        "BoolArray":   ("bool", [True, False, True, False]),
+        "Int16Array":  ("int",  [-10, 20, -30, 40]),
+        "UInt16Array": ("int",  [1, 2, 3, 65000]),
+        "Int32Array":  ("int",  [-100000, 0, 100000, 7]),
+        "FloatArray":  ("num",  [1.5, 2.5, 3.5, 4.5]),
+        "DoubleArray": ("num",  [1.25, 2.5, 3.75, 4.0]),
+        "StringArray": ("str",  ["alpha", "beta", "gamma", "delta"]),
+    }
+    awrites = [{"namespaceUri": NS, "tagId": PREFIX + n, "value": v} for n, (_, v) in ARRAYS.items()]
+    _, aw = envelope("WriteTags", {"writes": awrites})
+    c.publish(write_topic, aw)
+    time.sleep(2.5)
+    rp = request(c, read_topic, "ReadTags", {"tags": [{"namespaceUri": NS, "tagId": PREFIX + n} for n in ARRAYS]})
+    agot = {node_of_read(e): e for e in (rp.get("body", {}).get("reads", []) if rp else [])}
+
+    def elem_ok(x, kind):
+        if kind == "bool":
+            return isinstance(x, bool)
+        if kind == "str":
+            return isinstance(x, str)
+        return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+    for name, (kind, expected) in ARRAYS.items():
+        e = agot.get(PREFIX + name)
+        v = e.get("value") if e else None
+        shape_ok = isinstance(v, list) and len(v) == 4 and all(elem_ok(x, kind) for x in v)
+        check("arrays/read", name, shape_ok and (e or {}).get("quality") == "GOOD", f"value={v!r}")
+        if isinstance(v, list) and len(v) == len(expected):
+            rt = (all(abs(float(a) - float(b)) < 1e-3 for a, b in zip(v, expected)) if kind == "num"
+                  else v == expected)
+        else:
+            rt = False
+        check("arrays/write", name, rt, f"wrote {expected!r} -> read {v!r}")
+
+    # --- DateTime: read as clean ISO-8601, not a debug toString ---------------------------
+    rp = request(c, read_topic, "ReadTags", {"tags": [{"namespaceUri": NS, "tagId": "_System._DateTime"}]})
+    dt = next((e.get("value") for e in (rp.get("body", {}).get("reads", []) if rp else [])), None)
+    parsed = False
+    if isinstance(dt, str) and "DateTime{" not in dt:
+        try:
+            datetime.fromisoformat(dt.replace("Z", "+00:00"))
+            parsed = True
+        except Exception:
+            parsed = False
+    check("datetime", "DateTime read as ISO-8601", parsed, f"{dt!r}")
+
     # --- T6: addressing by namespaceUri vs literal ns index ------------------------------
     rp = request(c, read_topic, "ReadTags", {"tags": [
         {"namespaceUri": NS, "tagId": PREFIX + "Int32"},

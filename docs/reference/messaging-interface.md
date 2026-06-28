@@ -52,7 +52,7 @@ The `value`/`quality`/timestamp shape used in both `SouthboundTagUpdate` and `So
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `value` | number \| boolean \| string | Numbers (incl. OPC UA unsigned) → JSON number; booleans → JSON boolean; everything else → string. |
+| `value` | number \| boolean \| string \| array | Numbers (incl. OPC UA unsigned) → JSON number; booleans → JSON boolean; `DateTime` → ISO-8601 string; **arrays → JSON array** (each element by these same rules); anything else → string. |
 | `quality` | string | Normalized: `GOOD` \| `BAD` \| `UNCERTAIN`. |
 | `qualityRaw` | string | Native OPC UA `StatusCode`. |
 | `sourceTs` | string \| null | Device timestamp, ISO-8601 UTC. |
@@ -105,7 +105,10 @@ A single object (no `writes` array) is also accepted.
 Entries missing a namespace (`namespaceUri` or `ns`), `tagId`, or `value` are skipped. Writes are
 issued as one OPC UA `writeValues` call.
 Supported value types (by the target node's data type): `Boolean`, `SByte`, `Byte`, `Int16`,
-`UInt16`, `Int32`, `UInt32`, `Int64`, `UInt64`, `Float`, `Double`, `String`.
+`UInt16`, `Int32`, `UInt32`, `Int64`, `UInt64`, `Float`, `Double`, `String`, and `DateTime`
+(ISO-8601 string). To write an **array** tag, send a JSON array as `value` (e.g.
+`"value": [1, 2, 3, 4]`); its elements are coerced to the node's element type and the length must
+match the tag's array dimension.
 
 ### read (request/reply)
 
