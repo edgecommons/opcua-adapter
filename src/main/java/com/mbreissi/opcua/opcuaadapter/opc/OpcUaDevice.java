@@ -1,6 +1,7 @@
 package com.mbreissi.opcua.opcuaadapter.opc;
 
 import com.mbreissi.ggcommons.config.ConfigManager;
+import com.mbreissi.ggcommons.credentials.CredentialService;
 import com.mbreissi.ggcommons.messaging.MessagingClient;
 import com.mbreissi.ggcommons.metrics.MetricEmitter;
 import com.mbreissi.opcua.opcuaadapter.opc.config.ServerConfiguration;
@@ -30,12 +31,12 @@ public class OpcUaDevice {
     private final ClientMetrics counters = new ClientMetrics();
 
     public OpcUaDevice(ConfigManager configManager, MessagingClient messaging, MetricEmitter metrics,
-                       ServerConfiguration config) {
+                       CredentialService credentials, ServerConfiguration config) {
         this.config = config;
         HealthMetrics health = new HealthMetrics(metrics, configManager, config.getId(), counters);
 
         // 1. Connect (blocks + retries).
-        connection = new OpcUaConnection(config);
+        connection = new OpcUaConnection(config, credentials);
         OpcUaClient client = connection.connect();
         health.emit(true);
 

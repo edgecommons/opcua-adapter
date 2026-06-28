@@ -1,15 +1,22 @@
 package com.mbreissi.opcua.opcuaadapter.opc;
 
+import com.mbreissi.ggcommons.credentials.CredentialService;
 import com.mbreissi.opcua.opcuaadapter.opc.config.ConnectionInfo;
 import com.mbreissi.opcua.opcuaadapter.opc.config.ServerConfiguration;
+import com.mbreissi.opcua.opcuaadapter.opc.security.ClientIdentity;
+import com.mbreissi.opcua.opcuaadapter.opc.security.Pem;
+import com.mbreissi.opcua.opcuaadapter.opc.security.SecurityConfig;
+import com.mbreissi.opcua.opcuaadapter.opc.security.TrustListBuilder;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
 import org.eclipse.milo.opcua.sdk.client.identity.AnonymousProvider;
 import org.eclipse.milo.opcua.stack.core.StatusCodes;
 import org.eclipse.milo.opcua.stack.core.UaException;
+import org.eclipse.milo.opcua.stack.core.security.DefaultClientCertificateValidator;
 import org.eclipse.milo.opcua.stack.core.security.SecurityPolicy;
 import org.eclipse.milo.opcua.stack.core.types.builtin.LocalizedText;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.MessageSecurityMode;
 
 /**
  * Owns the OPC UA client connection for one device: creates the client for the configured security
@@ -22,11 +29,13 @@ public class OpcUaConnection {
     private static final long RETRY_MS = 5000;
 
     private final ServerConfiguration config;
+    private final CredentialService credentials;
     private OpcUaClient client;
     private volatile boolean connected = false;
 
-    public OpcUaConnection(ServerConfiguration config) {
+    public OpcUaConnection(ServerConfiguration config, CredentialService credentials) {
         this.config = config;
+        this.credentials = credentials;
     }
 
     public boolean isConnected() {
@@ -59,7 +68,7 @@ public class OpcUaConnection {
         return client;
     }
 
-    private OpcUaClient createClient(String endpoint, SecurityPolicy policy) throws UaException {
+    private OpcUaClient createClient(String endpoint, SecurityPolicy policy) throws Exception {
         if (policy == SecurityPolicy.None) {
             // Anonymous, no security. Lambda param types are inferred from the create() overload,
             // which sidesteps importing the (package-moved) config/transport builder types.
@@ -74,10 +83,32 @@ public class OpcUaConnection {
                             .setApplicationUri("urn:ggcommons:opcua:adapter")
                             .setIdentityProvider(new AnonymousProvider()));
         }
-        // TODO(security, T6): secure channel (Basic256Sha256/SignAndEncrypt) sourced from the
-        // credentials vault. Until implemented, fail fast rather than silently downgrade.
-        throw new UaException(StatusCodes.Bad_NotImplemented,
-                "Secure OPC UA connections not yet implemented (policy=" + policy + ")");
+        // Secure channel (e.g. Basic256Sha256 / SignAndEncrypt): client cert/key from the configured
+        // source (vault/file/pkcs11), server trust via the per-device PKI dir + optional pinned cert.
+        SecurityConfig sec = SecurityConfig.from(config, credentials);
+        ClientIdentity identity = sec.certSource().load();
+        String appUri = sec.applicationUri() != null
+                ? sec.applicationUri()
+                : Pem.sanUri(identity.certificate()).orElseThrow(() -> new UaException(
+                        StatusCodes.Bad_ConfigurationError,
+                        "client certificate has no SubjectAltName URI; set connection.applicationUri"));
+        DefaultClientCertificateValidator validator = TrustListBuilder.build(sec.pkiDir(), sec.serverTrustAnchor());
+        MessageSecurityMode mode = sec.messageMode();
+        LOGGER.info("[{}] secure connect: policy={} mode={} appUri={}", config.getId(), policy, mode, appUri);
+        return OpcUaClient.create(
+                endpoint,
+                endpoints -> endpoints.stream()
+                        .filter(e -> e.getSecurityPolicyUri().equals(policy.getUri()) && e.getSecurityMode() == mode)
+                        .findFirst(),
+                transport -> { },
+                cfg -> cfg
+                        .setApplicationName(LocalizedText.english("GGCommons OPC UA Adapter"))
+                        .setApplicationUri(appUri)
+                        .setKeyPair(identity.keyPair())
+                        .setCertificate(identity.certificate())
+                        .setCertificateChain(identity.chain())
+                        .setCertificateValidator(validator)
+                        .setIdentityProvider(new AnonymousProvider()));
     }
 
     private SecurityPolicy parsePolicy(String name) {

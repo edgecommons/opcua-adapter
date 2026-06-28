@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.mbreissi.ggcommons.GGCommons;
 import com.mbreissi.ggcommons.GGCommonsBuilder;
 import com.mbreissi.ggcommons.config.ConfigManager;
+import com.mbreissi.ggcommons.credentials.CredentialService;
 import com.mbreissi.ggcommons.messaging.MessagingClient;
 import com.mbreissi.ggcommons.metrics.MetricEmitter;
 import com.mbreissi.opcua.opcuaadapter.opc.OpcUaDevice;
@@ -31,6 +32,7 @@ public class OpcUaAdapter {
     private final ConfigManager config;
     private final MessagingClient messaging;
     private final MetricEmitter metrics;
+    private final CredentialService credentials;
     private final List<OpcUaDevice> devices = new ArrayList<>();
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
 
@@ -45,6 +47,7 @@ public class OpcUaAdapter {
         config = ggCommons.getConfigManager();
         messaging = ggCommons.getMessaging();
         metrics = ggCommons.getMetrics();
+        credentials = ggCommons.getCredentials();   // null when no 'credentials' config section
     }
 
     public void run() {
@@ -57,7 +60,7 @@ public class OpcUaAdapter {
             Thread worker = new Thread(() -> {
                 try {
                     ServerConfiguration serverConfig = new ServerConfiguration(config, globalConfig, instanceId);
-                    OpcUaDevice device = new OpcUaDevice(config, messaging, metrics, serverConfig);
+                    OpcUaDevice device = new OpcUaDevice(config, messaging, metrics, credentials, serverConfig);
                     synchronized (devices) {
                         devices.add(device);
                     }
