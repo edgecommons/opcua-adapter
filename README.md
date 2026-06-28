@@ -1,103 +1,130 @@
-# OpcUaAdapter
+# OPC UA Adapter (`com.mbreissi.opcua.OpcUaAdapter`)
 
-An AWS IoT Greengrass v2 **protocol-adapter** component (`com.mbreissi.opcua.OpcUaAdapter`) written in Java on
-top of the `ggcommons` Java library. A protocol adapter is a **southbound bridge**: it talks to field
-devices/servers over some protocol (OPC UA, Modbus, EtherNet/IP, …) and republishes their values
-northbound on the GGCommons messaging bus using the standard **southbound contract**
-(see `docs/SOUTHBOUND.md` in the ggcommons monorepo).
+An AWS IoT Greengrass v2 **southbound protocol adapter** that bridges **OPC UA** servers onto the
+GGCommons messaging bus, built on the `ggcommons` Java library and **Eclipse Milo 1.1.x**. It
+subscribes to OPC UA tags and republishes value changes using the cross-language **southbound
+contract** (`SouthboundTagUpdate`; see `docs/SOUTHBOUND.md` in the ggcommons monorepo), and exposes a
+command surface for on-demand **batch read** and **batch write**.
 
-The library gives you the standard CLI contract, configuration, logging, messaging, metrics,
-heartbeat, and graceful lifecycle — so you write only the **protocol code**, at the `TODO(adapter)`
-markers in `src/main/java/.../OpcUaAdapter.java`.
+This component was migrated from a pre-refactor bridge: ported to the current ggcommons API, upgraded
+Milo 0.6.9 → 1.1.4, decomposed into focused classes, and given working secure connections.
 
-## What the scaffold already does
+## Capabilities
 
-- Constructs the runtime via `GGCommonsBuilder`, reads config, and starts **one worker per configured
-  device instance** (`component.instances[].id`).
-- Publishes each tag update with the standard **`SouthboundTagUpdate`** envelope — `body.device`,
-  `body.tag` (canonical `id` + opaque protocol-native `address`), and `body.samples[]` with a
-  **normalized `quality`** (`GOOD|BAD|UNCERTAIN`) plus the native `qualityRaw`.
-- Defines and emits the standard **`southbound_health`** metric (connection state, poll/publish
-  latency, read errors, stale tags).
-- Relies on the library's SIGTERM/SIGINT hook for graceful shutdown (no manual hook;
-  `main()` blocks on a latch).
+- **Browse + subscribe** with per-tag sampling rate, queue size, and **deadband**; include/exclude
+  matchers by `namespace` + regex over nodeId / browseName / displayName.
+- **Tier-1 publishing** — each change → a `SouthboundTagUpdate` message (normalized
+  `GOOD|BAD|UNCERTAIN` quality + native `qualityRaw` + source/server timestamps), batched per node.
+- **Batch write** (`writeValues`) and **on-demand batch read** (`readValuesAsync`) over request/reply.
+- **Secure connections** — `Basic256Sha256` / `SignAndEncrypt` with the client cert/key sourced from
+  the ggcommons **credentials vault**, a file, or a **PKCS#11** token; server trust via a PKI dir.
+- **`southbound_health`** metric per instance (connection state, read errors).
 
-It is **protocol-agnostic on purpose** — no protocol SDK is bundled. The placeholder worker emits a
-synthetic value so the scaffold runs end-to-end; replace it with your protocol logic.
+## Architecture
 
-## What you fill in
+One `OpcUaDevice` per configured instance coordinates focused collaborators:
+`OpcUaConnection` (connect + security) · `AddressSpaceBrowser` · `SubscriptionManager` ·
+`TagUpdatePublisher` · `CommandService` (read/write/control) · `ValueCodec` · `HealthMetrics`.
 
-1. **Add your protocol SDK** to `pom.xml` (see the `TODO(adapter)` comment there — e.g.
-   `org.eclipse.milo:milo-sdk-client:1.1.4` for OPC UA).
-2. In `OpcUaAdapter.java`, at the `TODO(adapter)` markers:
-   - `runInstance(...)` — open the connection (with retry/backoff), then subscribe or poll per
-     `instance.subscriptions[]`.
-   - on each value received, call `publishUpdate(...)` with the tag identity, value, and normalized
-     quality.
-   - map your native status codes → `GOOD|BAD|UNCERTAIN` (+ `qualityRaw`).
-   - `onConfigurationChanged()` — re-apply subscription config on hot reload.
+## Build
 
-## Config convention (southbound)
+Java 25 + Maven; depends on `com.mbreissi:ggcommons` (from GitHub Packages, or `mvn install` of
+`libs/java` to your local `~/.m2`).
 
-Adapter config lives under the **permissive** `component.global` / `component.instances[]` (no schema
-change needed). See `test-configs/OpcUaAdapter.json` for a full example. Shape:
+```bash
+mvn clean package      # -> target/OpcUaAdapter-1.0.0.jar (shaded)
+```
+
+## Run (HOST / MQTT, local)
+
+```bash
+java -jar target/OpcUaAdapter-1.0.0.jar \
+  --platform HOST --transport MQTT ./messaging-local.json \
+  -c FILE ./config.json -t my-thing
+```
+Needs a local MQTT broker (e.g. EMQX on `localhost:1883`). Under Greengrass: `--platform GREENGRASS
+-c GG_CONFIG -t <thing>`.
+
+## Configuration (southbound convention)
+
+Adapter config lives under the permissive `component.global` / `component.instances[]` (no schema
+change). One instance = one OPC UA server:
 
 ```jsonc
 "component": {
-  "global":    { "defaults": { "publishIntervalMs": 1000, "samplingRateMs": 500, "queueSize": 100 },
-                 "healthThresholds": { "staleTagSecs": 30 } },
+  "global": { "defaults": { "publishIntervalMs": 1000, "samplingRateMs": 500, "queueSize": 100 } },
   "instances": [ {
-    "id": "device-1", "adapter": "<protocol>",
-    "connection":  { "endpoint": "..." },
-    "publish":     { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{tagId}", "batchMs": 1000 },
-    "write":       { "enabled": false, "topic": "..." },
-    "subscriptions":[ { "id": "...", "include": [ { "namespace": 0, "match": "<regex>", "deadband": {"type":"Absolute","value":0.0} } ], "exclude": [] } ]
+    "id": "kep1",
+    "adapter": "opcua",
+    "connection": { "endpoint": "opc.tcp://host:4840/", "securityPolicy": "None" },
+    "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{tagId}", "batchMs": 1000 },
+    "write":   { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
+    "read":    { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
+    "subscriptions": [ {
+      "id": "sines",
+      "include": [ { "namespace": 2, "match": "^Simulation\\.Sine.*", "samplingRateMs": 250,
+                     "queueSize": 50, "deadband": { "type": "Absolute", "value": 0.5 } } ],
+      "exclude": [ { "namespace": 2, "match": "Simulation\\.Sine4" } ]
+    } ]
   } ]
 }
 ```
 
-## Run locally (HOST platform, MQTT transport)
+## Command surface
 
-```bash
-mvn clean package
-java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT ./standalone-messaging.json \
-  -c FILE test-configs/OpcUaAdapter.json -t my-thing-name
+- **Write** (to `write.topic`): `{ "writes": [ { "ns": 2, "tagId": "Setpoint", "value": 42.5 }, ... ] }`
+  (a single `{ns,tagId,value}` object is also accepted; optional `status`, `sourceTs`).
+- **Read** (request/reply to `read.topic`): request `{ "tags": [ { "ns": 2, "tagId": "Counter" }, ... ] }`
+  → reply `SouthboundReadResult` `{ "id": "...", "reads": [ { "tag": {...}, "value", "quality", ... } ] }`.
+
+## Secure connections
+
+Set `securityPolicy` (e.g. `Basic256Sha256`) + `messageMode` (`SignAndEncrypt`) and a client
+certificate source:
+
+```jsonc
+"connection": {
+  "endpoint": "opc.tcp://host:4840/",
+  "securityPolicy": "Basic256Sha256",
+  "messageMode": "SignAndEncrypt",
+  "clientCertificate": { "source": "vault", "secret": "opcua/kep1/appcert" },
+  // or  { "source": "file",   "certPath": "...", "keyPath": "..." }
+  // or  { "source": "pkcs11", "modulePath": "...", "slotIndex": 0, "pinEnv": "HSM_PIN",
+  //       "keyLabel": "...", "certLabel": "..." }
+  "trust": {
+    "pkiDir": "/var/lib/opcua/{InstanceId}/pki",
+    "serverCertificate": { "source": "file", "path": "server.pem" }  // optional pin; else use pkiDir/trusted
+  }
+}
 ```
 
-Needs a local MQTT broker (e.g. `docker run -d -p 1883:1883 emqx/emqx:latest`). Subscribe to
-`heartbeat/+/+` for heartbeats and `southbound/#` to see tag updates.
+- **`vault` source** reads a `TlsBundle` secret `{certPem, keyPem, caPem}` via
+  `gg.getCredentials().getTlsBundle(...)` (requires a `credentials` config section). `caPem` becomes
+  the server trust anchor.
+- **`applicationUri`** is derived from the client cert's **SubjectAltName URI** (or set
+  `connection.applicationUri`). It MUST byte-for-byte equal the SAN URI, or the server rejects the
+  session — the single most common OPC UA security failure.
 
-## Run under Greengrass
+### Client/server certificate requirements (OPC UA)
 
-```bash
-java -jar target/OpcUaAdapter-1.0.0.jar --platform GREENGRASS -c GG_CONFIG -t my-thing-name
-```
+An OPC UA application instance certificate's **KeyUsage MUST include** `digitalSignature`,
+`nonRepudiation` (contentCommitment), `keyEncipherment`, and `dataEncipherment`. **Self-signed**
+certs (their own trust anchor) must additionally set `keyCertSign` + `BasicConstraints: CA=true`, and
+carry the application URI in a SubjectAltName URI. Milo's validator enforces these and will reject
+certs that omit them (`Bad_CertificateUseNotAllowed`). See `validation/gen_certs.py` for a compliant
+self-signed generator.
 
-## Deploy
+## Validation
 
-Built with **Maven** (a shaded, self-contained JAR), packaged with the **GDK**:
+`validation/` contains a reproducible smoke harness (asyncua simulator + MQTT test client) covering
+subscribe→publish, on-demand read, and batch write, for both **plaintext** and **secure**
+(`Basic256Sha256`) connections. See `validation/README.md`.
 
-```bash
-mvn clean package
-gdk component build
-gdk component publish
-```
+## Troubleshooting
 
-> The `Dockerfile` and `k8s/` manifests are emitted only when **KUBERNETES** is a selected target
-> platform (`--platforms KUBERNETES`); see those files for the container/k8s flow.
-
-## CLI contract
-
-- `-c/--config <SOURCE> [args]` — `FILE`, `ENV`, `GG_CONFIG`, `SHADOW`, `CONFIG_COMPONENT` (default from the platform profile).
-- `--platform <PLATFORM>` — `GREENGRASS`, `HOST`, `KUBERNETES`, or `auto` (default `auto`).
-- `--transport <TRANSPORT> [path]` — `IPC` or `MQTT [messaging_config.json]` (IPC only valid on GREENGRASS).
-- `-t/--thing <name>` — IoT Thing name.
-
-## Layout
-
-| Path | What it is |
-|------|-----------|
-| `src/main/java/.../OpcUaAdapter.java` | Your adapter — fill in the `TODO(adapter)` markers. |
-| `pom.xml` | Maven build (shaded JAR); add your protocol SDK here. |
-| `test-configs/` | Sample southbound config (`OpcUaAdapter.json`). |
-| `recipe.yaml`, `gdk-config.json` | Greengrass recipe + GDK build/publish config. |
+| Symptom | Cause / fix |
+|---|---|
+| `Bad_CertificateUseNotAllowed: required KeyUsage '…'` | Cert missing `nonRepudiation` / `keyCertSign` — see cert requirements above. |
+| Server rejects session right after secure handshake | `applicationUri` ≠ client cert SAN URI. |
+| Connects but no `SouthboundTagUpdate` | subscription `namespace`/`match` don't match any nodes (check the server's address space). |
+| Secure connect retries forever | server cert not trusted — pin it via `trust.serverCertificate` or drop it in `pkiDir/trusted`. |
