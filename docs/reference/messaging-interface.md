@@ -1,0 +1,166 @@
+# Reference — Messaging Interface & CLI
+
+Complete specification of every topic and message the adapter publishes or accepts, and the
+command-line flags. For the data-plane / control-plane model and the reasoning behind the contract,
+see [explanation.md](../explanation.md); for client recipes, see the
+[how-to guides](../how-to-guides.md).
+
+## Envelope
+
+All messages use the GGCommons JSON envelope:
+
+```jsonc
+{
+  "header": {
+    "name": "SouthboundTagUpdate",   // message type
+    "version": "1.0",
+    "timestamp": "2026-06-28T12:00:00Z",
+    "uuid": "…",
+    "correlation_id": "…",           // present on replies (echoes the request)
+    "reply_to": "…"                  // present on requests (reply destination)
+  },
+  "tags": { "thing": "<thingName>", "site": "plant1", … },
+  "body": { … }                       // per message type, below
+}
+```
+
+**Inbound leniency.** For messages the adapter *consumes* (write, read, control), the **topic**
+selects the action; `header.name` is not validated, and a bare JSON object (no envelope) is accepted
+as the body. Replies the adapter *sends* are always full envelopes.
+
+**Request/reply.** For read and control queries, the client sets `header.reply_to` (a topic it
+subscribes to) and a unique `header.correlation_id`; the adapter publishes the reply to `reply_to`
+with the same `correlation_id`. A GGCommons client's `request()` API sets these automatically.
+
+## Topics
+
+| Plane | Message | Direction | Topic (default) | Reply |
+|-------|---------|-----------|-----------------|-------|
+| data | `SouthboundTagUpdate` | adapter → bus | `southbound/{site}/{ComponentName}/{InstanceId}/{tagId}` | — |
+| data | write | bus → adapter | `southbound/{ComponentName}/{InstanceId}/write` | — |
+| data | read | bus ↔ adapter | `southbound/{ComponentName}/{InstanceId}/read` | `SouthboundReadResult` |
+| control | status | bus ↔ adapter | `southbound/{ComponentName}/{InstanceId}/control/status` | `status` |
+| control | subscriptions | bus ↔ adapter | `southbound/{ComponentName}/{InstanceId}/control/subscriptions` | `subscriptions` |
+| control | `southbound_health` | adapter → metric target | per `metricEmission` | — |
+
+Topics are templated — see [configuration.md](configuration.md#template-variables). The control topic
+is a fixed wildcard subscription, `…/control/+`.
+
+## Sample object
+
+The `value`/`quality`/timestamp shape used in both `SouthboundTagUpdate` and `SouthboundReadResult`:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `value` | number \| boolean \| string | Numbers (incl. OPC UA unsigned) → JSON number; booleans → JSON boolean; everything else → string. |
+| `quality` | string | Normalized: `GOOD` \| `BAD` \| `UNCERTAIN`. |
+| `qualityRaw` | string | Native OPC UA `StatusCode`. |
+| `sourceTs` | string \| null | Device timestamp, ISO-8601 UTC. |
+| `serverTs` | string \| null | Server timestamp, ISO-8601 UTC. |
+
+## Data plane
+
+### `SouthboundTagUpdate` (adapter → bus)
+
+Published when subscribed tag values change. One message carries one tag's `samples` (one or many,
+per `publish.batchMs`). Topic: the instance `publish.topic`, with `{tagId}` = the node identifier.
+
+```jsonc
+"body": {
+  "device": { "adapter": "opcua", "instance": "kep1", "endpoint": "opc.tcp://host:49320/" },
+  "tag": {
+    "id": "ns=2;s=Channel1.Device1.Sine1",         // canonical, stable id
+    "name": "Sine1",                                 // displayName, else browseName
+    "address": { "ns": 2, "nodeId": "Channel1.Device1.Sine1" }
+  },
+  "samples": [ { "value": 0.7071, "quality": "GOOD", "qualityRaw": "Good (0x00000000)",
+                 "sourceTs": "2026-06-28T12:00:00.123Z", "serverTs": "2026-06-28T12:00:00.150Z" } ]
+}
+```
+
+### write (bus → adapter)
+
+Writes one or many tag values. Fire-and-forget (no reply). Requires `write.enabled: true`. Topic:
+`write.topic`.
+
+```jsonc
+"body": { "writes": [ { "ns": 2, "tagId": "Channel1.Device1.Setpoint", "value": 42.5,
+                        "status": "GOOD", "sourceTs": "2026-06-28T12:00:00Z" } ] }
+```
+A single `{ns,tagId,value}` object (no `writes` array) is also accepted.
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `ns` | yes | namespace index |
+| `tagId` | yes | node identifier |
+| `value` | yes | coerced to the node's data type (below) |
+| `status` | no (`GOOD`) | `GOOD` \| `BAD` \| `UNCERTAIN` |
+| `sourceTs` | no | ISO-8601 source timestamp |
+
+Entries missing `ns`/`tagId`/`value` are skipped. Writes are issued as one OPC UA `writeValues` call.
+Supported value types (by the target node's data type): `Boolean`, `SByte`, `Byte`, `Int16`,
+`UInt16`, `Int32`, `UInt32`, `Int64`, `UInt64`, `Float`, `Double`, `String`.
+
+### read (request/reply)
+
+Reads arbitrary tags on demand. Request topic: `read.topic`.
+
+```jsonc
+// request body
+"body": { "tags": [ { "ns": 2, "tagId": "…Counter" }, { "ns": 2, "tagId": "…Setpoint" } ] }
+```
+```jsonc
+// reply: header.name = "SouthboundReadResult", published to reply_to
+"body": {
+  "id": "kep1",
+  "reads": [ { "tag": { "id": "ns=2;s=…Counter", "address": { "ns": 2, "nodeId": "…Counter" } },
+               "value": 17, "quality": "GOOD", "qualityRaw": "Good (0x00000000)",
+               "sourceTs": "…", "serverTs": "…" } ]
+}
+```
+`reads[i]` corresponds to `tags[i]`; each entry has the sample fields above plus its `tag`.
+
+## Control plane
+
+### status (request/reply)
+
+Request topic `…/control/status` (any body). Reply `header.name` = `status`:
+
+```jsonc
+"body": {
+  "id": "kep1",
+  "connected": true,
+  "metrics": { "read": { "interval": 1234, "total": 98765 }, "write": { "interval": 2, "total": 40 } }
+}
+```
+`connected` is the OPC UA session state; `interval` counts reset each reporting cycle, `total` is
+lifetime.
+
+### subscriptions (request/reply)
+
+Request topic `…/control/subscriptions` (any body). Reply `header.name` = `subscriptions`:
+
+```jsonc
+"body": { "id": "kep1", "tags": [ { "tagId": "…Sine1", "namespace": 2, "match": "^…Sine.*" } ] }
+```
+Lists the tags currently resolved/subscribed and the matcher that selected each.
+
+### `southbound_health` (metric)
+
+Emitted via the configured `metricEmission.target`.
+
+| Measure | Unit | Meaning |
+|---------|------|---------|
+| `connectionState` | Count | `1` connected, `0` down |
+| `readErrors` | Count | read errors over the interval |
+
+Dimensions: `instance` (plus auto-injected `coreName`/`component`).
+
+## CLI
+
+| Flag | Values | Notes |
+|------|--------|-------|
+| `--platform` | `GREENGRASS` \| `HOST` \| `KUBERNETES` \| `auto` | Default `auto`. |
+| `--transport` | `IPC` \| `MQTT [path]` | Defaults from the platform; `IPC` only on GREENGRASS. |
+| `-c/--config` | `FILE <path>` \| `ENV` \| `GG_CONFIG` \| `SHADOW` \| `CONFIG_COMPONENT` \| `CONFIGMAP` | Default from the platform. |
+| `-t/--thing` | `<name>` | IoT Thing name; also `{ThingName}` in topics. |

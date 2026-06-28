@@ -1,72 +1,47 @@
 # OPC UA Adapter — Documentation
 
-`com.mbreissi.opcua.OpcUaAdapter` bridges one or more **OPC UA servers** onto the GGCommons
-messaging bus. It browses each server, subscribes to tags, and republishes value changes as
-structured messages, and it serves on-demand reads/writes and management queries. It is a normal
-Greengrass v2 component built on the `ggcommons` Java library and **Eclipse Milo 1.1.x**.
+`com.mbreissi.opcua.OpcUaAdapter` connects to OPC UA servers and bridges their tags onto a message
+bus: it streams value changes as structured messages and serves on-demand reads, writes, and
+management queries. It is a Greengrass v2 component built on the `ggcommons` library and Eclipse Milo.
 
-This folder is the operator/integrator reference. If you are **deploying** the adapter or **writing a
-client** that consumes or commands it, start here.
+This documentation is organized along the four [Diátaxis](https://diataxis.fr/) modes, because reading
+to *learn*, to *accomplish a task*, to *look something up*, and to *understand* are different needs:
 
-## Documentation map
+| | Start here when you want to… | |
+|---|---|---|
+| **[Tutorial](tutorial.md)** | learn by doing — bring the adapter up against a simulator, end to end | *a guided lesson* |
+| **[How-to guides](how-to-guides.md)** | accomplish a specific task — secure a connection, select tags, read/write, deploy | *recipes* |
+| **[Reference](reference/)** | look up an exact option, topic, or payload | *the specification* |
+| **[Explanation](explanation.md)** | understand how it works and why — the timing pipeline, the two planes, the security model | *the discussion* |
 
-| Doc | Read it to… |
-|-----|-------------|
-| **[configuration.md](configuration.md)** | Understand **every configuration option** — what it means, its type, default, and effect. |
-| **[messaging-interface.md](messaging-interface.md)** | Understand the **full message interface** — every topic and payload the adapter publishes or accepts (data plane + control plane), with schemas and examples. |
-| **[security.md](security.md)** | Configure **secure (encrypted/authenticated) OPC UA connections** — certificate sources, trust, and the OPC UA certificate requirements. |
-| **[deployment-and-operations.md](deployment-and-operations.md)** | **Build, deploy** (HOST / Greengrass / Kubernetes) and **operate** (health, status, logs, troubleshooting). |
+## Quick routing
 
-## What the adapter does (at a glance)
+- **"I'm new here."** → [Tutorial](tutorial.md).
+- **"What does this config option do?"** → [Reference — Configuration](reference/configuration.md).
+- **"What message do I send / receive on which topic?"** → [Reference — Messaging Interface](reference/messaging-interface.md).
+- **"How do I connect to a secured server?"** → [How-to](how-to-guides.md#connect-to-a-secured-server).
+- **"Why is my data too fast / slow / laggy?"** → [Explanation — The timing pipeline](explanation.md#the-timing-pipeline-the-thing-most-worth-understanding).
+- **"Is it connected and healthy?"** → [How-to — Observe health and status](how-to-guides.md#observe-health-and-status).
+
+## Audience
+
+These docs are for **integrators and operators** — people who deploy the adapter and write clients
+that consume or command it. (Contributing to the adapter's own code is not covered here; see the
+source and the monorepo's `docs/SOUTHBOUND.md` for the cross-language contract.)
+
+## The two planes, in one picture
 
 ```
-   OPC UA server(s)                 OPC UA Adapter                     GGCommons messaging bus
-  ┌───────────────┐   browse +    ┌──────────────────┐   publish     ┌──────────────────────┐
-  │  PLC / SCADA  │◀── subscribe ─│  one device per   │── tag updates▶│ southbound/.../<tag> │
-  │  historian    │── values ────▶│  instance         │               │                      │
-  │  (opc.tcp://) │◀── write ─────│  (browse, sub,    │◀── write ─────│ .../write            │
-  │               │── read ──────▶│   read, command)  │◀─▶ read (req/reply) .../read          │
-  └───────────────┘               └──────────────────┘◀─▶ control (req/reply) .../control/+  │
-                                          │ health metric ─▶ metricEmission target            │
-                                          └──────────────────────────────────────────────────┘
+   OPC UA server(s)            OPC UA Adapter                      message bus
+  ┌──────────────┐  browse +  ┌────────────────┐   data plane    ┌────────────────────────┐
+  │ PLC / SCADA  │◀─subscribe─│ one instance   │── tag updates ─▶│ southbound/.../<tag>   │
+  │ historian    │── values ─▶│ per server     │◀── write ───────│ .../write              │
+  │ (opc.tcp://) │◀─ write ───│                │◀─▶ read (req/reply) .../read              │
+  │              │── read ───▶│                │◀─▶ control (req/reply) .../control/+      │
+  └──────────────┘            └────────────────┘   control plane  health ─▶ metric target │
+                                                                  └────────────────────────┘
 ```
 
-- **One instance per server.** Each entry in `component.instances[]` is an independent connection to
-  one OPC UA endpoint, with its own subscriptions, topics, and security.
-- **The adapter is configured once and then driven by messages.** After deployment, clients interact
-  with it entirely over the bus (publish/subscribe + request/reply) — see the messaging interface.
-
-## Data plane vs. control plane
-
-The adapter's message interface splits into two planes. Knowing which is which tells you what to
-subscribe to, what to send, and what to expect back.
-
-### Data plane — tag values (high volume)
-The continuous flow of process data between the OPC UA server and the bus.
-
-| Interaction | Direction | Topic (default) | Reply? |
-|---|---|---|---|
-| **Tag updates** (`SouthboundTagUpdate`) | adapter → bus | `southbound/{site}/{ComponentName}/{InstanceId}/{tagId}` | no (stream) |
-| **Write tags** | bus → adapter → device | `southbound/{ComponentName}/{InstanceId}/write` | no |
-| **Read tags** (on demand) | bus ↔ adapter ↔ device | `southbound/{ComponentName}/{InstanceId}/read` | **yes** (`SouthboundReadResult`) |
-
-### Control plane — management (low volume)
-Operating, observing, and introspecting the adapter itself — not process data.
-
-| Interaction | Direction | Topic (default) | Reply? |
-|---|---|---|---|
-| **Status query** | bus ↔ adapter | `southbound/{ComponentName}/{InstanceId}/control/status` | **yes** (`status`) |
-| **Subscriptions query** | bus ↔ adapter | `southbound/{ComponentName}/{InstanceId}/control/subscriptions` | **yes** (`subscriptions`) |
-| **Health metric** (`southbound_health`) | adapter → metric target | per `metricEmission` config | no |
-| **Heartbeat** (ggcommons) | adapter → bus | `heartbeat/{ThingName}/{ComponentName}` | no |
-
-Full schemas, examples, and the request/reply mechanics are in
-**[messaging-interface.md](messaging-interface.md)**.
-
-## Mental model for a deployer
-
-1. **Configure** the connection(s), subscriptions, and topics — [configuration.md](configuration.md).
-2. **Secure** the connection if the server requires it — [security.md](security.md).
-3. **Deploy** to your platform — [deployment-and-operations.md](deployment-and-operations.md).
-4. **Consume** `SouthboundTagUpdate` and (optionally) **command** the adapter via read/write/control —
-   [messaging-interface.md](messaging-interface.md).
+The **data plane** carries process values (the tag-update stream, plus reads and writes); the
+**control plane** carries management (status/subscription queries and the health metric). Keeping them
+distinct is the key to integrating cleanly — see [Explanation](explanation.md#two-planes-data-and-control).

@@ -11,15 +11,15 @@ decomposed into focused classes, and given working secure connections.
 
 ## 📖 Documentation
 
-Full operator/integrator docs are in **[`docs/`](docs/)**:
+Full operator/integrator docs are in **[`docs/`](docs/)**, organized by [Diátaxis](https://diataxis.fr/):
 
 | Doc | For |
 |-----|-----|
-| [docs/README.md](docs/README.md) | Overview + the data-plane / control-plane model |
-| [docs/configuration.md](docs/configuration.md) | **Every configuration option**, with types, defaults, meaning |
-| [docs/messaging-interface.md](docs/messaging-interface.md) | The **full message interface** — every topic & payload, with schemas |
-| [docs/security.md](docs/security.md) | Secure connections, certificate sources & requirements |
-| [docs/deployment-and-operations.md](docs/deployment-and-operations.md) | Build, deploy (HOST/Greengrass/k8s), operate, troubleshoot |
+| [docs/tutorial.md](docs/tutorial.md) | **Learn by doing** — bring the adapter up against a simulator, end to end |
+| [docs/how-to-guides.md](docs/how-to-guides.md) | **Task recipes** — secure connect, select tags, tune rates, read/write, deploy |
+| [docs/reference/configuration.md](docs/reference/configuration.md) | **Every configuration option** — types, defaults, meaning |
+| [docs/reference/messaging-interface.md](docs/reference/messaging-interface.md) | **Every topic & message payload** + the CLI |
+| [docs/explanation.md](docs/explanation.md) | **How it works and why** — the timing pipeline, the two planes, the security model |
 
 ## Capabilities
 
