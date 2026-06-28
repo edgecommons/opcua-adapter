@@ -6,7 +6,7 @@ import com.mbreissi.ggcommons.GGCommonsBuilder;
 import com.mbreissi.ggcommons.config.ConfigManager;
 import com.mbreissi.ggcommons.messaging.MessagingClient;
 import com.mbreissi.ggcommons.metrics.MetricEmitter;
-import com.mbreissi.opcua.opcuaadapter.opc.Client;
+import com.mbreissi.opcua.opcuaadapter.opc.OpcUaDevice;
 import com.mbreissi.opcua.opcuaadapter.opc.config.ServerConfiguration;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -31,7 +31,7 @@ public class OpcUaAdapter {
     private final ConfigManager config;
     private final MessagingClient messaging;
     private final MetricEmitter metrics;
-    private final List<Client> clients = new ArrayList<>();
+    private final List<OpcUaDevice> devices = new ArrayList<>();
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
 
     public static void main(String[] args) {
@@ -57,9 +57,9 @@ public class OpcUaAdapter {
             Thread worker = new Thread(() -> {
                 try {
                     ServerConfiguration serverConfig = new ServerConfiguration(config, globalConfig, instanceId);
-                    Client client = new Client(config, messaging, metrics, serverConfig);
-                    synchronized (clients) {
-                        clients.add(client);
+                    OpcUaDevice device = new OpcUaDevice(config, messaging, metrics, serverConfig);
+                    synchronized (devices) {
+                        devices.add(device);
                     }
                     ggCommons.setReady(true);   // ready once at least one device is connected + subscribed
                 } catch (Exception e) {
