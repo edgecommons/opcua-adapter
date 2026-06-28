@@ -54,12 +54,13 @@
       <version>2.10.1</version>
     </dependency>
 
-    <!-- TODO(adapter): add your protocol SDK here. This scaffold is intentionally protocol-agnostic.
-         Examples:
-           OPC UA  ->  org.eclipse.milo:milo-sdk-client:1.1.4   (pulls in BouncyCastle for security)
-           Modbus  ->  a Modbus client library of your choice
-         Then implement the connect / subscribe-or-poll / value->SouthboundTagUpdate mapping in the
-         App class where the TODO(adapter) markers are. -->
+    <!-- OPC UA client SDK (Eclipse Milo 1.x). Brings BouncyCastle (bcprov/bcpkix) transitively,
+         which the secure-connection layer uses for PEM cert/key handling. -->
+    <dependency>
+      <groupId>org.eclipse.milo</groupId>
+      <artifactId>milo-sdk-client</artifactId>
+      <version>1.1.4</version>
+    </dependency>
   </dependencies>
 
   <build>
