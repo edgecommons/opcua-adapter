@@ -75,12 +75,27 @@ python validation/validate_kep_user.py       # data flows under the UserName ide
 ```
 
 The server applies that user's authorization — an under-privileged account may browse only part of the
-address space (the `config-kep-user.json` here targets the world-readable ns=0 `ServerStatus` so it
-works regardless of tag-namespace permissions). KEP's `_System.*` tags are read-only, so the write
-phase needs a writable tag on a Channel/Device.
+address space. KEP's `_System.*` tags are read-only, so the write phase needs a writable tag on a
+Channel/Device.
+
+**Secure (`Basic256Sha256` / `SignAndEncrypt`).** Generate a client cert, pin KEP's server cert, and
+complete the mutual-trust handshake:
+
+```bash
+python validation/gen_certs.py                                   # -> certs/client_{cert,key}.pem
+python validation/kep_server_cert.py opc.tcp://<host>:49320 validation/certs/kep_server_cert.pem
+java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
+     validation/messaging-local.json -c FILE validation/config-kep-secure.json -t kep-thing &
+# first attempt fails Bad_SecurityChecksFailed: in KEP's OPC UA Config Mgr -> Trusted Clients,
+# trust "GGCommons OPC UA Adapter". The adapter retries every 5s and connects.
+python validation/validate_kep.py                                # ALL PASS over the encrypted channel
+```
+
+For the realistic production config — secure channel **and** a UserName token together — use the
+gitignored `validation/config-kep-secure-user.json` (the secure config plus `connection.user`).
 
 > `validation/config-kep-user.json` and any `validation/*-user.json` are **gitignored** — they carry
-> inline credentials. Never commit them.
+> inline credentials. Never commit them. The `certs/` and `pki/` dirs are gitignored too.
 
 ## Notes
 
