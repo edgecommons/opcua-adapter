@@ -2,17 +2,15 @@
 
 `com.mbreissi.opcua.OpcUaAdapter` connects to OPC UA servers and bridges their tags onto a message
 bus: it streams value changes as structured messages and serves on-demand reads, writes, and
-management queries. It is a Greengrass v2 component built on the `ggcommons` library and Eclipse Milo.
+management queries. Built on the `ggcommons` library and Eclipse Milo, it runs wherever you deploy it
+— as a Greengrass v2 component, a standalone process, or a Kubernetes pod.
 
-This documentation is organized along the four [Diátaxis](https://diataxis.fr/) modes, because reading
-to *learn*, to *accomplish a task*, to *look something up*, and to *understand* are different needs:
-
-| | Start here when you want to… | |
-|---|---|---|
-| **[Tutorial](tutorial.md)** | learn by doing — bring the adapter up against a simulator, end to end | *a guided lesson* |
-| **[How-to guides](how-to-guides.md)** | accomplish a specific task — secure a connection, select tags, read/write, deploy | *recipes* |
-| **[Reference](reference/)** | look up an exact option, topic, or payload | *the specification* |
-| **[Explanation](explanation.md)** | understand how it works and why — the timing pipeline, the two planes, the security model | *the discussion* |
+| Doc | Start here when you want to… |
+|-----|------------------------------|
+| **[Tutorial](tutorial.md)** | learn by doing — bring the adapter up against a simulator, end to end |
+| **[How-to guides](how-to-guides.md)** | accomplish a specific task — secure a connection, select tags, read/write, deploy |
+| **[Reference](reference/)** | look up an exact option, topic, or payload |
+| **[Explanation](explanation.md)** | understand how it works and why — the timing pipeline, the two planes, the security model |
 
 ## Quick routing
 
@@ -26,22 +24,4 @@ to *learn*, to *accomplish a task*, to *look something up*, and to *understand* 
 ## Audience
 
 These docs are for **integrators and operators** — people who deploy the adapter and write clients
-that consume or command it. (Contributing to the adapter's own code is not covered here; see the
-source and the monorepo's `docs/SOUTHBOUND.md` for the cross-language contract.)
-
-## The two planes, in one picture
-
-```
-   OPC UA server(s)            OPC UA Adapter                      message bus
-  ┌──────────────┐  browse +  ┌────────────────┐   data plane    ┌────────────────────────┐
-  │ PLC / SCADA  │◀─subscribe─│ one instance   │── tag updates ─▶│ southbound/.../<tag>   │
-  │ historian    │── values ─▶│ per server     │◀── write ───────│ .../write              │
-  │ (opc.tcp://) │◀─ write ───│                │◀─▶ read (req/reply) .../read              │
-  │              │── read ───▶│                │◀─▶ control (req/reply) .../control/+      │
-  └──────────────┘            └────────────────┘   control plane  health ─▶ metric target │
-                                                                  └────────────────────────┘
-```
-
-The **data plane** carries process values (the tag-update stream, plus reads and writes); the
-**control plane** carries management (status/subscription queries and the health metric). Keeping them
-distinct is the key to integrating cleanly — see [Explanation](explanation.md#two-planes-data-and-control).
+that consume or command it. They do not cover modifying the adapter's own source.

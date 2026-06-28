@@ -12,7 +12,7 @@ translator between those two worlds. It connects to one or more OPC UA servers, 
 care about, and re-publishes their values as structured messages — and in the other direction, it
 lets a client read or write tags on demand without knowing anything about OPC UA.
 
-It is deliberately thin. All the cross-cutting concerns a Greengrass component needs — configuration,
+It is deliberately thin. All the cross-cutting concerns an edge component needs — configuration,
 messaging transport, metrics, credentials, lifecycle — come from the `ggcommons` library, so the
 adapter contains only OPC UA logic. That logic is built on **Eclipse Milo**, the mature OPC UA stack
 for the JVM.
@@ -53,6 +53,17 @@ subscription problem are easy to tell apart.
 The adapter's message interface divides cleanly into two planes, and keeping them straight is the key
 to integrating with it.
 
+```mermaid
+flowchart LR
+    SRV["OPC UA server(s)<br/>opc.tcp://"]
+    DEV["OPC UA Adapter<br/>one instance per server"]
+    DP["<b>Data plane</b><br/>tag updates · reads · writes"]
+    CP["<b>Control plane</b><br/>status · subscriptions · health"]
+    SRV <-->|"browse · subscribe · read · write"| DEV
+    DEV <--> DP
+    DEV <--> CP
+```
+
 The **data plane** carries process values. It is the high-volume traffic: a continuous stream of tag
 updates flowing out to the bus, plus on-demand reads and writes of tag values. This is the reason the
 adapter exists.
@@ -72,17 +83,15 @@ A value does not travel from the device to the bus in one step. It passes throug
 each stage has its own timing control. Confusing these three is the single most common source of
 "why is my data too fast, too slow, or too laggy" problems.
 
-```
- device value
-     │  ① sampled every  samplingRateMs       — the server reads the source value
-     ▼
- [ server-side queue ]  size = queueSize      — samples wait here between deliveries
-     │  ② delivered every  publishIntervalMs  — the server sends a batch of queued samples
-     ▼
-   adapter
-     │  ③ coalesced for  batchMs              — the adapter groups a tag's samples
-     ▼
- SouthboundTagUpdate  →  bus
+```mermaid
+flowchart TD
+    V["device value"]
+    Q["server-side queue<br/>size = queueSize"]
+    A["adapter"]
+    M["SouthboundTagUpdate → bus"]
+    V -->|"① sample every samplingRateMs"| Q
+    Q -->|"② deliver every publishIntervalMs"| A
+    A -->|"③ coalesce for batchMs"| M
 ```
 
 **Sampling decides resolution.** `samplingRateMs` is how often the server *looks at* the underlying
