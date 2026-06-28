@@ -17,6 +17,7 @@ management queries. Built on the `ggcommons` library and Eclipse Milo, it runs w
 - **"I'm new here."** → [Tutorial](tutorial.md).
 - **"What does this config option do?"** → [Reference — Configuration](reference/configuration.md).
 - **"What message do I send / receive on which topic?"** → [Reference — Messaging Interface](reference/messaging-interface.md).
+- **"How is each OPC UA / KEP data type represented on the wire?"** → [Reference — Data Types](reference/data-types.md).
 - **"How do I connect to a secured server?"** → [How-to](how-to-guides.md#connect-to-a-secured-server).
 - **"Why is my data too fast / slow / laggy?"** → [Explanation — The timing pipeline](explanation.md#the-timing-pipeline-the-thing-most-worth-understanding).
 - **"Is it connected and healthy?"** → [How-to — Observe health and status](how-to-guides.md#observe-health-and-status).

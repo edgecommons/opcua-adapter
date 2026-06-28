@@ -58,6 +58,9 @@ The `value`/`quality`/timestamp shape used in both `SouthboundTagUpdate` and `So
 | `sourceTs` | string \| null | Device timestamp, ISO-8601 UTC. |
 | `serverTs` | string \| null | Server timestamp, ISO-8601 UTC. |
 
+The complete OPC UA ↔ JSON mapping for every type — reads and writes, with the corresponding KEP data
+types — is in **[data-types.md](data-types.md)**.
+
 ## Data plane
 
 ### `SouthboundTagUpdate` (adapter → bus)
