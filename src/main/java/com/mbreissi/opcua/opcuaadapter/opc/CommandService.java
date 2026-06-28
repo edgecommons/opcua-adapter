@@ -80,11 +80,17 @@ public class CommandService {
             List<DataValue> dataValues = new ArrayList<>();
             for (JsonElement el : writes) {
                 JsonObject w = el.getAsJsonObject();
-                if (!w.has("ns") || !w.has("tagId") || !w.has("value")) {
-                    LOGGER.error("[{}] write entry missing ns/tagId/value; skipping: {}", serverConfig.getId(), w);
+                if (!w.has("value")) {
+                    LOGGER.error("[{}] write entry missing value; skipping: {}", serverConfig.getId(), w);
                     continue;
                 }
-                NodeId nodeId = new NodeId(w.get("ns").getAsInt(), w.get("tagId").getAsString());
+                NodeId nodeId;
+                try {
+                    nodeId = nodeIdFrom(w);
+                } catch (Exception e) {
+                    LOGGER.error("[{}] write entry skipped: {}", serverConfig.getId(), e.getMessage());
+                    continue;
+                }
                 UaNode node = client.getAddressSpace().getNode(nodeId);
                 if (!(node instanceof UaVariableNode)) {
                     LOGGER.error("[{}] write target {} is not a variable; skipping", serverConfig.getId(), nodeId);
@@ -116,8 +122,10 @@ public class CommandService {
     }
 
     /**
-     * On-demand batch read (request/reply): request body {@code {"tags":[{ns,tagId}, ...]}};
-     * reply body {@code {"id":..., "reads":[{tag:{id,address}, value, quality, qualityRaw, sourceTs, serverTs}]}}.
+     * On-demand batch read (request/reply): request body
+     * {@code {"tags":[{namespaceUri|ns, tagId}, ...]}}; reply body
+     * {@code {"id":..., "reads":[{tag:{id,address}, value, quality, qualityRaw, sourceTs, serverTs}]}}.
+     * Tags that cannot be resolved are omitted from {@code reads}; match results by {@code tag}, not position.
      */
     private void handleRead(Message request) {
         try {
@@ -125,8 +133,11 @@ public class CommandService {
             JsonArray tags = (payload != null && payload.has("tags")) ? payload.getAsJsonArray("tags") : new JsonArray();
             List<NodeId> nodeIds = new ArrayList<>();
             for (JsonElement el : tags) {
-                JsonObject t = el.getAsJsonObject();
-                nodeIds.add(new NodeId(t.get("ns").getAsInt(), t.get("tagId").getAsString()));
+                try {
+                    nodeIds.add(nodeIdFrom(el.getAsJsonObject()));
+                } catch (Exception e) {
+                    LOGGER.warn("[{}] read tag skipped: {}", serverConfig.getId(), e.getMessage());
+                }
             }
             List<DataValue> values = nodeIds.isEmpty()
                     ? new ArrayList<>()
@@ -187,6 +198,32 @@ public class CommandService {
                 .withConfig(config)
                 .build();
         messaging.reply(request, response);
+    }
+
+    /**
+     * Build a {@link NodeId} from a read/write request entry. The namespace is identified by
+     * {@code namespaceUri} (preferred — resolved to the server's current index) or a literal
+     * {@code ns} index; {@code tagId} is the node identifier. Throws if the entry is incomplete or the
+     * URI is not in the server's namespace table.
+     */
+    private NodeId nodeIdFrom(JsonObject o) {
+        if (!o.has("tagId")) {
+            throw new IllegalArgumentException("entry missing 'tagId': " + o);
+        }
+        int ns;
+        if (o.has("namespaceUri")) {
+            String uri = o.get("namespaceUri").getAsString();
+            var idx = client.getNamespaceTable().getIndex(uri);
+            if (idx == null) {
+                throw new IllegalArgumentException("namespaceUri '" + uri + "' not in the server's namespace table");
+            }
+            ns = idx.intValue();
+        } else if (o.has("ns")) {
+            ns = o.get("ns").getAsInt();
+        } else {
+            throw new IllegalArgumentException("entry needs 'namespaceUri' or 'ns': " + o);
+        }
+        return new NodeId(ns, o.get("tagId").getAsString());
     }
 
     private static JsonObject asJsonObject(Message message) {

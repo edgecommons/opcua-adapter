@@ -100,18 +100,19 @@ Keep `queueSize ≥ ceil(publishIntervalMs / samplingRateMs)` or the server disc
 **Write** (requires `write.enabled: true`) — publish to the write topic, no reply:
 ```
 topic:   southbound/<ComponentName>/<InstanceId>/write
-payload: { "writes": [ { "ns": 2, "tagId": "…Setpoint", "value": 42.5 } ] }
+payload: { "writes": [ { "namespaceUri": "urn:kepware:KEPServerEX", "tagId": "…Setpoint", "value": 42.5 } ] }
 ```
 
 **Read** — request/reply; set `reply_to` and `correlation_id`, subscribe to your reply topic:
 ```
 publish   topic: southbound/<ComponentName>/<InstanceId>/read
           payload: { "header": { "reply_to": "app/replies/42", "correlation_id": "42" },
-                     "body": { "tags": [ { "ns": 2, "tagId": "…Counter" } ] } }
+                     "body": { "tags": [ { "namespaceUri": "urn:kepware:KEPServerEX", "tagId": "…Counter" } ] } }
 subscribe topic: app/replies/42   → a SouthboundReadResult with correlation_id "42"
 ```
-With a GGCommons client, use its `request()` API instead of setting the header fields by hand. Full
-payload schemas are in the [messaging reference](reference/messaging-interface.md).
+Address each tag by `namespaceUri` (preferred, resolved at runtime) or a literal `ns` index, plus
+`tagId`. With a GGCommons client, use its `request()` API instead of setting the header fields by
+hand. Full payload schemas are in the [messaging reference](reference/messaging-interface.md).
 
 ---
 

@@ -88,20 +88,22 @@ Writes one or many tag values. Fire-and-forget (no reply). Requires `write.enabl
 `write.topic`.
 
 ```jsonc
-"body": { "writes": [ { "ns": 2, "tagId": "Channel1.Device1.Setpoint", "value": 42.5,
-                        "status": "GOOD", "sourceTs": "2026-06-28T12:00:00Z" } ] }
+"body": { "writes": [ { "namespaceUri": "urn:kepware:KEPServerEX", "tagId": "Channel1.Device1.Setpoint",
+                        "value": 42.5, "status": "GOOD", "sourceTs": "2026-06-28T12:00:00Z" } ] }
 ```
-A single `{ns,tagId,value}` object (no `writes` array) is also accepted.
+A single object (no `writes` array) is also accepted.
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `ns` | yes | namespace index |
+| `namespaceUri` | preferred | namespace URI, resolved to the server's current index |
+| `ns` | or `namespaceUri` | literal namespace index (used when `namespaceUri` is absent) |
 | `tagId` | yes | node identifier |
 | `value` | yes | coerced to the node's data type (below) |
 | `status` | no (`GOOD`) | `GOOD` \| `BAD` \| `UNCERTAIN` |
 | `sourceTs` | no | ISO-8601 source timestamp |
 
-Entries missing `ns`/`tagId`/`value` are skipped. Writes are issued as one OPC UA `writeValues` call.
+Entries missing a namespace (`namespaceUri` or `ns`), `tagId`, or `value` are skipped. Writes are
+issued as one OPC UA `writeValues` call.
 Supported value types (by the target node's data type): `Boolean`, `SByte`, `Byte`, `Int16`,
 `UInt16`, `Int32`, `UInt32`, `Int64`, `UInt64`, `Float`, `Double`, `String`.
 
@@ -111,7 +113,7 @@ Reads arbitrary tags on demand. Request topic: `read.topic`.
 
 ```jsonc
 // request body
-"body": { "tags": [ { "ns": 2, "tagId": "…Counter" }, { "ns": 2, "tagId": "…Setpoint" } ] }
+"body": { "tags": [ { "namespaceUri": "urn:kepware:KEPServerEX", "tagId": "…Counter" }, { "ns": 2, "tagId": "…Setpoint" } ] }
 ```
 ```jsonc
 // reply: header.name = "SouthboundReadResult", published to reply_to
@@ -122,8 +124,9 @@ Reads arbitrary tags on demand. Request topic: `read.topic`.
                "sourceTs": "…", "serverTs": "…" } ]
 }
 ```
-`reads[i]` corresponds to `tags[i]`; each entry has the sample fields above plus its `tag`. Read and
-write requests address tags by `ns` (namespace index) + `tagId`.
+Each tag is addressed by `namespaceUri` (preferred) or `ns` index, plus `tagId`. `reads[i]`
+corresponds to `tags[i]`; each entry carries the sample fields above plus its own `tag`. Tags that
+cannot be resolved are omitted from `reads`, so match results by `tag` rather than position.
 
 ## Control plane
 
