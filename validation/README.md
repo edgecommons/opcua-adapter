@@ -75,8 +75,16 @@ python validation/validate_kep_user.py       # data flows under the UserName ide
 ```
 
 The server applies that user's authorization — an under-privileged account may browse only part of the
-address space. KEP's `_System.*` tags are read-only, so the write phase needs a writable tag on a
-Channel/Device.
+address space.
+
+**Write.** KEP's `_System.*` tags are read-only, so the write path needs a writable tag on a
+Channel/Device. With one present (e.g. `Channel1.Device1.Tag2`), `validate_kep_write.py` reads it,
+writes a new value of the same type, and reads it back to confirm the write landed (the account needs
+write permission):
+
+```bash
+python validation/validate_kep_write.py     # write -> read-back; PASS
+```
 
 **Secure (`Basic256Sha256` / `SignAndEncrypt`).** Generate a client cert, pin KEP's server cert, and
 complete the mutual-trust handshake:
