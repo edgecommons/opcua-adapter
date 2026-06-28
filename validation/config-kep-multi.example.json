@@ -1,0 +1,46 @@
+{
+  "_comment": "Two OPC UA servers from ONE adapter (validate_multi.py): instance 'sim1' -> asyncua sim, 'kep1' -> KEPServerEX. Copy to config-kep-multi.json (gitignored) and set kep1 connection.user. Start the sim (opcua_sim_server.py) and run kep_setup.py first.",
+  "tags": { "appId": "multi", "site": "lab", "shop": "s1", "line": "l1" },
+  "logging": { "level": "INFO" },
+  "metricEmission": {
+    "target": "messaging",
+    "targetConfig": { "topic": "metrics/{ThingName}/{ComponentName}" }
+  },
+  "component": {
+    "global": {
+      "defaults": { "publishIntervalMs": 500, "samplingRateMs": 200, "queueSize": 20 }
+    },
+    "instances": [
+      {
+        "id": "sim1",
+        "adapter": "opcua",
+        "connection": { "endpoint": "opc.tcp://localhost:4840/", "securityPolicy": "None" },
+        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{tagId}", "batchMs": 0 },
+        "write": { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
+        "read": { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
+        "subscriptions": [
+          { "id": "sines",
+            "include": [ { "namespaceUri": "urn:ggcommons:sim", "match": "Sine.*", "samplingRateMs": 200, "queueSize": 20 } ],
+            "exclude": [] }
+        ]
+      },
+      {
+        "id": "kep1",
+        "adapter": "opcua",
+        "connection": {
+          "endpoint": "opc.tcp://<kep-host>:49320",
+          "securityPolicy": "None",
+          "user": { "username": "<kep-ua-user>", "password": "<password>" }
+        },
+        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{tagId}", "batchMs": 0 },
+        "write": { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
+        "read": { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
+        "subscriptions": [
+          { "id": "live",
+            "include": [ { "namespaceUri": "Kepware Server", "match": "^GGCommonsTest\\.Device1\\.Live.*", "samplingRateMs": 200, "queueSize": 20 } ],
+            "exclude": [] }
+        ]
+      }
+    ]
+  }
+}

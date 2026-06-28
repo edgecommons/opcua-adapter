@@ -143,6 +143,25 @@ java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
 python validation/validate_sim_datetime.py     # DateTime read (ISO) + write round-trip; ALL PASS
 ```
 
+## Multiple servers at once
+
+One adapter process bridges several OPC UA servers — one `component.instances[]` entry each, each on
+its own connection and worker thread. `config-kep-multi.json` runs two: `sim1` → the asyncua sim,
+`kep1` → KEPServerEX.
+
+```bash
+python validation/opcua_sim_server.py &
+java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
+     validation/messaging-local.json -c FILE validation/config-kep-multi.json -t multi-thing &
+python validation/validate_multi.py        # both stream concurrently + route independently; ALL PASS
+```
+
+It checks both instances stream at once with the correct per-instance identity (`device.instance` /
+`device.endpoint` / `namespaceUri`), publish to distinct `{InstanceId}` topics, and that an on-demand
+read on each instance's topic resolves only that server's tags. Instances are **independent**: if one
+server is unreachable its worker retries every 5s without affecting the others (verified — the sim
+kept streaming while the KEP server was down).
+
 ## Notes
 
 - `validation/certs/` and `validation/pki/` are generated and **gitignored** — never commit keys.
