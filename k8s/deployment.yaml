@@ -47,6 +47,7 @@ spec:
           readinessProbe:
             httpGet: { path: /readyz, port: health }
             periodSeconds: 10
+          workingDir: /tmp   # Java Paho writes its file-persistence dir in cwd; keep cwd on the writable tmp volume
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

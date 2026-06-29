@@ -15,7 +15,9 @@ RUN mvn -q -DskipTests package
 
 # ---- Stage 2: minimal JRE runtime, non-root (UID 65532) ----
 FROM eclipse-temurin:25-jre
-WORKDIR /app
 COPY --from=build /build/target/OpcUaAdapter-1.0.0.jar /app/app.jar
 USER 65532:65532
+# Run from a writable dir: the Java Paho client creates its file-persistence dir in the CWD, which
+# must be writable under runAsNonRoot + readOnlyRootFilesystem (k8s mounts a tmp emptyDir at /tmp).
+WORKDIR /tmp
 ENTRYPOINT ["java", "--enable-native-access=ALL-UNNAMED", "-jar", "/app/app.jar"]
