@@ -115,15 +115,15 @@
          monorepo build use `mvn install` on libs/java instead (then ~/.m2 satisfies it). -->
     <repository>
       <id>github</id>
-      <url>https://maven.pkg.github.com/mbreissi/ggcommons</url>
+      <url>https://maven.pkg.github.com/edgecommons/ggcommons</url>
     </repository>
   </repositories>
 
   <distributionManagement>
-    <!-- Where THIS component would publish — edit to your own GitHub Packages repo. -->
+    <!-- Where THIS component would publish (adapters normally ship as GDK components, not Maven). -->
     <repository>
       <id>github</id>
-      <url>https://maven.pkg.github.com/OWNER/REPO</url>
+      <url>https://maven.pkg.github.com/edgecommons/opcua-adapter</url>
     </repository>
   </distributionManagement>
 </project>
