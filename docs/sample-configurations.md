@@ -26,8 +26,8 @@ This page is organized as:
   server, Kubernetes, multiple servers).
 - **[§4](#4-real-world-selective-subscription-at-scale)** — a large address space pruned to a precise,
   rate-controlled subset with broad `include` + `exclude`, multiple areas, and grouped timing.
-- **[§5](#5-three-channel-telemetry-local-bus--iot-core-control-plane--streaming)** — the
-  three-channel telemetry model (local bus, IoT Core control plane, high-throughput streaming).
+- **[§5](#5-northbound-from-the-local-bus-to-the-cloud)** — northbound publishing: the local
+  data plane, heartbeat/health to AWS IoT Core, and high-volume telemetry via `gg.streams()` streaming.
 
 ---
 
@@ -312,7 +312,7 @@ the **dual-MQTT** messaging block (local broker **and** AWS IoT Core) you would 
 
 | Option | Effect on runtime behavior |
 |--------|----------------------------|
-| `messaging.iotCore` | Adds the **cloud** half of the dual-MQTT transport. The adapter connects to the local broker **and** to AWS IoT Core over mutual TLS on `8883`. `credentials.certPath`/`keyPath`/`caPath` are the device's X.509 identity for IoT Core; a missing/expired cert means the cloud leg fails to connect (the local leg is unaffected). **Note:** connecting both legs does not by itself send tag updates to the cloud — the adapter's tag-update `publish` goes to the **local** bus only; see [§5](#5-three-channel-telemetry-local-bus--iot-core-control-plane--streaming) for what actually traverses the IoT Core leg and how. |
+| `messaging.iotCore` | Adds the **cloud** half of the dual-MQTT transport. The adapter connects to the local broker **and** to AWS IoT Core over mutual TLS on `8883`. `credentials.certPath`/`keyPath`/`caPath` are the device's X.509 identity for IoT Core; a missing/expired cert means the cloud leg fails to connect (the local leg is unaffected). **Note:** connecting both legs does not by itself send tag updates to the cloud — the adapter's tag-update `publish` goes to the **local** bus only; see [§5](#5-northbound-from-the-local-bus-to-the-cloud) for what actually traverses the IoT Core leg and how. |
 | `credentials` | Enables the encrypted local vault. **Required** whenever any `source: "vault"` reference is used (here for the client cert and the OPC UA user). Without it, those references cannot resolve and the secure connection fails to start. `vault.path` supports template variables. |
 
 ### Connection & security options
@@ -491,212 +491,64 @@ messages each carrying ~10 samples arriving ~1 s after the values were read.
 
 ---
 
-## 5. Three-channel telemetry: local bus + IoT Core control plane + streaming
+## 5. Northbound: from the local bus to the cloud
 
-A high-throughput OPC UA gateway typically routes telemetry over **three** channels, each tuned for a
-different volume/latency/cost profile. The ggcommons subsystems for all three coexist in one config
-document and one process:
+Everything in §1–§4 publishes to the **local bus** — Greengrass IPC on the `GREENGRASS`
+platform, the local MQTT broker on `HOST`/`KUBERNETES`. That is the adapter's data plane: it sends
+every `SouthboundTagUpdate` with the plain `publish` call, which targets the default provider channel
+(the local broker on HOST, IPC on Greengrass). On-box consumers — other components, a historian
+bridge, the rules engine — read those topics.
 
-| Channel | Carries | Backed by | Volume / cost profile |
-|---------|---------|-----------|-----------------------|
-| **1 — local data bus** | every `SouthboundTagUpdate` | `messaging.local` (MQTT) on HOST/k8s, or IPC on Greengrass | high volume, in-site, free |
-| **2 — northbound control plane** | low-rate status: heartbeat, `southbound_health`, alarms, commands/acks | `messaging.iotCore` (AWS IoT Core, MQTT) | low rate, per-message addressable, QoS, billed per message |
-| **3 — high-throughput streaming** | the bulk high-rate process history | `streaming.streams[]` → Kinesis/Kafka via the embedded `ggstreamlog` durable buffer | very high volume, batched/compressed, billed per shard/throughput |
-
-> **How telemetry actually flows (important).** The adapter's data-plane `publish()` writes to the
-> **local bus only** — by design, the edge gateway decides what leaves the site. The adapter itself
-> reaches the cloud only for its **own control plane** (it can route heartbeat and the
-> `southbound_health` metric to IoT Core via `destination: "iotcore"`). Discrete cloud alarms and
-> bulk streaming are done by a **co-located forwarder component** (any ggcommons component) that
-> subscribes to the adapter's local topics and re-emits them: low-rate items via
-> `messaging.publishToIotCore(...)` (Channel 2), high-rate process tags via
-> `gg.getStreams().stream(name).append(...)` (Channel 3). This split is why the per-subscription
-> topic structure from §4 matters — it is what makes each class of telemetry separately addressable
-> downstream.
-
-```mermaid
-flowchart LR
-    SRV["OPC UA server"]
-    AD["OPC UA Adapter<br/>publish() → local only"]
-    BUS["local bus<br/>messaging.local / IPC"]
-    FWD["forwarder<br/>(ggcommons component)"]
-    IOT["AWS IoT Core<br/>messaging.iotCore"]
-    KIN["Kinesis / Kafka<br/>streaming.streams[]"]
-    SRV -->|subscribe| AD
-    AD -->|"Channel 1: SouthboundTagUpdate"| BUS
-    AD -. "Channel 2: heartbeat + health (destination: iotcore)" .-> IOT
-    BUS -->|alarms/status| FWD
-    BUS -->|high-rate process| FWD
-    FWD -->|"Channel 2: publishToIotCore"| IOT
-    FWD -->|"Channel 3: streams().append()"| KIN
-```
-
-### (a) Adapter config — Channel 1, with its control plane on Channel 2
-
-The adapter publishes all tag updates to the local bus, structured so process and alarm tags land on
-distinct topics (the forwarder keys off these). Its heartbeat and health metric are routed to IoT
-Core directly.
+**What the adapter sends to the cloud itself.** The one northbound path the adapter wires directly is
+its own *operational* telemetry — the heartbeat and the health metric. The library can deliver them
+straight to AWS IoT Core alongside the local bus: on `HOST`/`KUBERNETES` the dual-MQTT provider holds
+the IoT Core mTLS session next to the local one. Opt in with `messaging.iotCore` plus a heartbeat /
+metric target set to `destination: "iotcore"`:
 
 ```jsonc
-// adapter-config.json  (--platform HOST --transport MQTT)
 {
-  "tags": { "site": "plant1", "shop": "assembly", "line": "5" },
-
   "messaging": {
-    "local":   { "type": "mqtt", "host": "localhost", "port": 1883, "clientId": "opcua-adapter" },
+    "local":   { "type": "mqtt", "host": "localhost", "port": 1883, "clientId": "opcua-line1" },
     "iotCore": {
-      "endpoint": "xxxx-ats.iot.us-east-1.amazonaws.com", "port": 8883, "clientId": "opcua-adapter",
-      "credentials": { "certPath": "creds/device.cert.pem", "keyPath": "creds/device.key", "caPath": "creds/root-CA.crt" }
+      "endpoint": "a1b2c3d4e5f6g7-ats.iot.us-east-1.amazonaws.com",
+      "port": 8883,
+      "clientId": "opcua-line1",
+      "credentials": {
+        "certPath": "/greengrass/v2/thingCert.crt",
+        "keyPath":  "/greengrass/v2/privKey.key",
+        "caPath":   "/greengrass/v2/rootCA.pem"
+      }
     }
   },
 
+  // Heartbeat and health go to IoT Core (low rate); tag data stays on the local bus.
   "heartbeat": {
     "intervalSecs": 30,
-    "targets": [ { "type": "messaging", "config": { "destination": "iotcore", "topic": "heartbeat/{ThingName}/{ComponentName}" } } ]
+    "targets": [ { "type": "messaging", "config": { "destination": "iotcore", "topic": "heartbeat/{ThingName}/{ComponentName}" } } ],
+    "measures": { "cpu": true, "memory": true }
   },
   "metricEmission": {
     "target": "messaging",
-    "targetConfig": { "destination": "iotcore", "topic": "status/{ThingName}/{ComponentName}/health" }
-  },
-
-  "component": {
-    "global": { "defaults": { "publishIntervalMs": 200, "samplingRateMs": 100, "queueSize": 50 } },
-    "instances": [
-      {
-        "id": "kep1",
-        "adapter": "opcua",
-        "connection": { "endpoint": "opc.tcp://192.168.1.50:49320", "securityPolicy": "None",
-                        "user": { "source": "vault", "secret": "opcua/kep1/login" } },
-        "publish": { "topic": "southbound/{site}/{InstanceId}/process/{tagId}", "batchMs": 1000 },
-        "subscriptions": [
-          { "id": "process", "publishIntervalMs": 200,
-            "include": [ { "namespaceUri": "Kepware Server", "match": "^Channel1\\..*",
-                           "deadband": { "type": "Absolute", "value": 0.5 } } ],
-            "exclude": [ { "namespaceUri": "Kepware Server", "match": ".*\\.Alarms\\..*" } ] },
-          { "id": "alarms", "publishIntervalMs": 250,
-            "include": [ { "namespaceUri": "Kepware Server", "match": ".*\\.Alarms\\..*",
-                           "samplingRateMs": 0, "topic": "southbound/{site}/{InstanceId}/alarms/{tagId}" } ] }
-        ]
-      }
-    ]
-  },
-  "credentials": { "vault": { "path": "/var/lib/opcua/{InstanceId}/vault" } }
+    "targetConfig": { "topic": "southbound/{ThingName}/{ComponentName}/health", "destination": "iotcore" }
+  }
 }
 ```
 
-This adapter publishes:
-- process tags → local `southbound/plant1/kep1/process/<tagId>`
-- alarm tags → local `southbound/plant1/kep1/alarms/<tagId>`
-- heartbeat + health → **IoT Core** (Channel 2) directly, via `destination: "iotcore"`.
+On `GREENGRASS` the same `destination: "iotcore"` routes through the Nucleus' IoT Core connection, so
+`messaging.iotCore` is not needed there.
 
-### (b) Forwarder config — Channel 2 (alarms) + Channel 3 (process streaming)
+**Forwarding the tag data itself.** The adapter does **not** push tag telemetry off-box — it
+publishes locally and stops there. Getting that data to the cloud is a deployment choice, handled by a
+separate consumer of the local topics:
 
-A second, co-located ggcommons component subscribes to the adapter's local topics and fans out. Its
-config carries the dual-MQTT block **and** a `streaming` section; its (application) logic appends each
-high-rate process message to the durable stream and republishes each alarm to IoT Core.
-
-```jsonc
-// forwarder-config.json  (--platform HOST --transport MQTT)
-{
-  "tags": { "site": "plant1" },
-
-  "messaging": {
-    "local":   { "type": "mqtt", "host": "localhost", "port": 1883, "clientId": "opcua-forwarder" },
-    "iotCore": {
-      "endpoint": "xxxx-ats.iot.us-east-1.amazonaws.com", "port": 8883, "clientId": "opcua-forwarder",
-      "credentials": { "certPath": "creds/device.cert.pem", "keyPath": "creds/device.key", "caPath": "creds/root-CA.crt" }
-    }
-  },
-
-  "streaming": {
-    "streams": [
-      {
-        "name": "process-telemetry",
-        "sink": { "type": "kinesis", "streamName": "{site}-process-telemetry", "region": "us-east-1" },
-        "buffer": {
-          "type": "disk",
-          "path": "/var/lib/ggstreamlog/{ComponentName}/process",
-          "maxDiskBytes": 2147483648,
-          "onFull": "dropOldest",
-          "fsync": "perBatch"
-        },
-        "batch": { "maxRecords": 500, "maxBytes": 4194304, "maxLatencyMs": 1000, "compression": "zstd" },
-        "delivery": { "maxRetries": -1, "backoffBaseMs": 50, "backoffMaxMs": 30000, "pollIntervalMs": 100 }
-      }
-    ]
-  },
-
-  "component": {}
-}
-```
-
-The forwarder's business logic (application code, not config) ties the two together:
-
-```text
-on local "southbound/plant1/kep1/process/#"  →  gg.getStreams().stream("process-telemetry")
-                                                   .append(tagId, sampleTsMs, messageBytes)   // Channel 3
-on local "southbound/plant1/kep1/alarms/#"    →  messaging.publishToIotCore(
-                                                   "alarms/plant1/kep1/"+tagId, msg, QOS.AT_LEAST_ONCE) // Channel 2
-```
-
-So a concrete process tag `Channel1.Device1.Flow`:
-
-```
-OPC UA  →  adapter publishes local  southbound/plant1/kep1/process/Channel1.Device1.Flow
-        →  forwarder appends to stream "process-telemetry"
-        →  ggstreamlog disk buffer  →  Kinesis stream  plant1-process-telemetry
-```
-
-and an alarm `Channel1.Device1.Alarms.HiHi`:
-
-```
-OPC UA  →  adapter publishes local  southbound/plant1/kep1/alarms/Channel1.Device1.Alarms.HiHi
-        →  forwarder republishes    →  AWS IoT Core  alarms/plant1/kep1/Channel1.Device1.Alarms.HiHi
-```
-
-### Streaming options
-
-> The `streaming` block conforms to the canonical schema: each `streams[]` entry **requires** `name`
-> and `sink`; `buffer`, `batch`, and `delivery` are optional and the embedded `ggstreamlog` core
-> supplies defaults for any you omit. Always set `buffer` (and prefer `type: "disk"`) on an edge
-> gateway so telemetry survives a cloud disconnect.
-
-**Sink** (`sink`, a tagged union on `type`):
-
-| Sink | Keys | Notes |
-|------|------|-------|
-| `kinesis` | `streamName` *(required, supports template vars)*, `region`, `endpointUrl` | `endpointUrl` overrides the AWS endpoint — set it for LocalStack/floci/VPC; omit (or `null`) for real Kinesis. |
-| `kafka` | `bootstrapServers` *(required)*, `topic` *(required)*, `properties` | `properties` is an open map of extra librdkafka producer settings. |
-
-**Buffer** (`buffer`) — the embedded store-and-forward layer:
-
-| Key | Default | Effect |
-|-----|---------|--------|
-| `type` | `disk` | `disk` = durable, file-backed (survives restarts/disconnects; needs `path`); `memory` = non-durable RAM ring. |
-| `path` | — | Buffer directory (disk only; supports template variables). |
-| `segmentBytes` | `67108864` | On-disk segment file size. |
-| `maxDiskBytes` | `1073741824` | Backlog byte budget. |
-| `maxAgeSecs` | — | Optional max record age before drop. |
-| `onFull` | `dropOldest` | At the budget: `dropOldest` (favor fresh data), `block` (apply backpressure), or `rejectNew`. |
-| `fsync` | `perBatch` | Durability flush policy: `always` / `perBatch` / `interval` (with `fsyncIntervalMs`). |
-| `maxBufferedRecords` | `10000` | In-flight record cap. |
-
-**Batch** (`batch`) — export coalescing: `maxRecords` (500), `maxBytes` (4 MiB), `maxLatencyMs`
-(1000), `compression` (`none`/`zstd`). **Delivery** (`delivery`) — retry/poll: `maxRetries`
-(`-1` = forever), `backoffBaseMs` (50), `backoffMaxMs` (30000), `pollIntervalMs` (100).
-
-### When to route a tag to streaming vs the IoT Core control plane
-
-| Use **Channel 2 — IoT Core (MQTT)** when… | Use **Channel 3 — streaming (Kinesis/Kafka)** when… |
-|--------------------------------------------|------------------------------------------------------|
-| The message is **low-rate** (alarms, state changes, status, heartbeat, command acks). | The data is **high-rate** continuous process history (many tags × many samples/s). |
-| Each message must be **individually addressable/subscribable** (topic-based fan-out, IoT rules). | You want **batched, compressed, ordered** records, not per-message pub/sub. |
-| You need **QoS** and round-trip request/reply (commands → acks). | You need a **durable on-disk buffer** that absorbs hours of cloud disconnect with flat memory. |
-| Per-message cloud cost is acceptable because volume is small. | Per-message MQTT cost would be prohibitive; per-shard/throughput billing is far cheaper at volume. |
-
-Rule of thumb: **control-plane and exceptions → IoT Core; bulk process telemetry → streaming.** The
-local bus (Channel 1) always carries everything in-site; the two northbound channels carry only the
-subset each is suited to.
+- **Low-rate, actionable** items (status, alarms, a few values someone acts on) — re-publish to AWS
+  IoT Core, either with a Greengrass/IoT-Core **topic bridge** (rules engine) or a small on-box
+  subscriber. IoT Core is priced per message, so keep this sparse.
+- **High-rate, high-volume** telemetry for analytics or a historian — the library's streaming
+  subsystem, `gg.streams()`, which batches and compresses into a durable on-disk buffer that drains to
+  Kinesis or Kafka and survives WAN outages. See the [Streaming guide](/guides/streaming/) and the
+  [streaming reference](/reference/streaming/) for its configuration; it is a `ggcommons` subsystem you
+  run in a forwarding component, not an `opcua-adapter` option.
 
 ---
 
