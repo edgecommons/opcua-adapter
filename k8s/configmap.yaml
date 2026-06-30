@@ -11,9 +11,23 @@ metadata:
 data:
   config.json: |-
     {
-      "component": "com.mbreissi.opcua.OpcUaAdapter",
       "messaging": {
         "local": { "type": "mqtt", "host": "emqx.default.svc.cluster.local", "port": 1883, "clientId": "OpcUaAdapter" }
       },
-      "logging": { "level": "INFO" }
+      "logging": { "level": "INFO" },
+      "metricEmission": { "target": "prometheus" },
+      "component": {
+        "global": { "defaults": { "publishIntervalMs": 1000, "samplingRateMs": 500, "queueSize": 100 } },
+        "instances": [
+          {
+            "id": "device-1",
+            "adapter": "opcua",
+            "connection": { "endpoint": "opc.tcp://opcua.default.svc.cluster.local:4840/", "securityPolicy": "None" },
+            "publish": { "topic": "southbound/{ComponentName}/{InstanceId}/{tagId}", "batchMs": 1000 },
+            "subscriptions": [
+              { "id": "all", "include": [ { "namespace": 0, "match": ".*" } ] }
+            ]
+          }
+        ]
+      }
     }
