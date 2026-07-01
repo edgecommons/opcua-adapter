@@ -3,7 +3,7 @@ package com.mbreissi.opcua.opcuaadapter.opc.config;
 import com.google.gson.JsonObject;
 
 /**
- * One tag matcher within a subscription's include/exclude list (southbound config convention):
+ * One signal matcher within a subscription's include/exclude list (southbound config convention):
  * {@code { "namespaceUri": "<uri>", "namespace": <int>, "match": "<regex>", "topic": "<optional>",
  * "samplingRateMs": <num>, "queueSize": <int>, "deadband": {...} }}.
  *
@@ -11,7 +11,7 @@ import com.google.gson.JsonObject;
  * index at runtime) or by a literal {@code namespace} index (fallback). {@code match} is a regex
  * applied to the node's identifier, browse name, or display name.
  */
-public class TagSpec {
+public class SignalSpec {
 
     private final int namespace;
     private final String namespaceUri;
@@ -21,7 +21,7 @@ public class TagSpec {
     private final int queueSize;
     private final DeadbandSpec deadband;
 
-    private TagSpec(int namespace, String namespaceUri, String match, String topic,
+    private SignalSpec(int namespace, String namespaceUri, String match, String topic,
                    double samplingRateMs, int queueSize, DeadbandSpec deadband) {
         this.namespace = namespace;
         this.namespaceUri = namespaceUri;
@@ -46,7 +46,7 @@ public class TagSpec {
         return match;
     }
 
-    /** Optional per-tag publish-topic override; {@code null} to use the instance's publish topic. */
+    /** Optional per-signal publish-topic override; {@code null} to use the instance's publish topic. */
     public String getTopic() {
         return topic;
     }
@@ -63,11 +63,11 @@ public class TagSpec {
         return deadband;
     }
 
-    public static TagSpec fromJson(JsonObject o) {
+    public static SignalSpec fromJson(JsonObject o) {
         return fromJson(o, 0.0, 1);
     }
 
-    public static TagSpec fromJson(JsonObject o, double defaultSamplingMs, int defaultQueueSize) {
+    public static SignalSpec fromJson(JsonObject o, double defaultSamplingMs, int defaultQueueSize) {
         int ns = o.has("namespace") ? o.get("namespace").getAsInt() : 0;
         String nsUri = o.has("namespaceUri") ? o.get("namespaceUri").getAsString() : null;
         String match = o.has("match") ? o.get("match").getAsString() : ".*";
@@ -75,6 +75,6 @@ public class TagSpec {
         double sampling = o.has("samplingRateMs") ? o.get("samplingRateMs").getAsDouble() : defaultSamplingMs;
         int queue = o.has("queueSize") ? o.get("queueSize").getAsInt() : defaultQueueSize;
         DeadbandSpec deadband = DeadbandSpec.fromJson(o.has("deadband") ? o.getAsJsonObject("deadband") : null);
-        return new TagSpec(ns, nsUri, match, topic, sampling, queue, deadband);
+        return new SignalSpec(ns, nsUri, match, topic, sampling, queue, deadband);
     }
 }

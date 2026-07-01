@@ -7,9 +7,9 @@ interface make sense as a whole. If you only need a specific value or a step-by-
 ## What the adapter is for
 
 Industrial servers speak OPC UA; the rest of your system speaks messages on a bus. The adapter is the
-translator between those two worlds. It connects to one or more OPC UA servers, watches the tags you
+translator between those two worlds. It connects to one or more OPC UA servers, watches the signals you
 care about, and re-publishes their values as structured messages — and in the other direction, it
-lets a client read or write tags on demand without knowing anything about OPC UA.
+lets a client read or write signals on demand without knowing anything about OPC UA.
 
 It is deliberately thin. All the cross-cutting concerns an edge component needs — configuration,
 messaging transport, metrics, credentials, lifecycle — come from the `ggcommons` library, so the
@@ -37,8 +37,8 @@ each with one responsibility, assembled by a thin coordinator (`OpcUaDevice`):
 |---|---|
 | `OpcUaConnection` | Create the OPC UA client for the configured security policy and connect with retry. |
 | `AddressSpaceBrowser` | Walk the server's address space and collect its variable nodes. |
-| `SubscriptionManager` | Match nodes to your tag specs and maintain the OPC UA subscriptions. |
-| `TagUpdatePublisher` | Turn value changes into `SouthboundTagUpdate` messages, batching per tag. |
+| `SubscriptionManager` | Match nodes to your signal specs and maintain the OPC UA subscriptions. |
+| `SignalUpdatePublisher` | Turn value changes into `SouthboundSignalUpdate` messages, batching per signal. |
 | `CommandService` | Serve the command surface: writes, on-demand reads, status/subscription queries. |
 | `ValueCodec` | Convert between OPC UA values and the JSON contract (types, quality, timestamps). |
 | `HealthMetrics` | Define and emit the `southbound_health` metric. |
@@ -56,15 +56,15 @@ to integrating with it.
 flowchart LR
     SRV["OPC UA server(s)<br/>opc.tcp://"]
     DEV["OPC UA Adapter<br/>one instance per server"]
-    DP["<b>Data plane</b><br/>tag updates · reads · writes"]
+    DP["<b>Data plane</b><br/>signal updates · reads · writes"]
     CP["<b>Control plane</b><br/>status · subscriptions · health"]
     SRV <-->|"browse · subscribe · read · write"| DEV
     DEV <--> DP
     DEV <--> CP
 ```
 
-The **data plane** carries process values. It is the high-volume traffic: a continuous stream of tag
-updates flowing out to the bus, plus on-demand reads and writes of tag values. This is the reason the
+The **data plane** carries process values. It is the high-volume traffic: a continuous stream of signal
+updates flowing out to the bus, plus on-demand reads and writes of signal values. This is the reason the
 adapter exists.
 
 The **control plane** carries management. It is low-volume and about the *adapter itself* rather than
@@ -87,7 +87,7 @@ flowchart TD
     V["device value"]
     Q["server-side queue<br/>size = queueSize"]
     A["adapter"]
-    M["SouthboundTagUpdate → bus"]
+    M["SouthboundSignalUpdate → bus"]
     V -->|"① sample every samplingRateMs"| Q
     Q -->|"② deliver every publishIntervalMs"| A
     A -->|"③ coalesce for batchMs"| M
@@ -99,11 +99,11 @@ Sampling at `0` means "as fast as the server allows," which is usually what you 
 deliberately throttling a noisy source.
 
 **Publishing decides latency.** `publishIntervalMs` is how often the server *sends you* what it has
-sampled. Between publishes, samples accumulate in a per-tag queue on the server. A shorter publish
+sampled. Between publishes, samples accumulate in a per-signal queue on the server. A shorter publish
 interval lowers end-to-end latency; a longer one reduces network chatter and lets the server batch.
 
 **Batching decides message granularity.** `batchMs` is the adapter's own client-side coalescing. With
-batching on, the adapter buffers a tag's incoming samples and emits one message per tag per interval,
+batching on, the adapter buffers a signal's incoming samples and emits one message per signal per interval,
 which may carry several `samples`. With batching off (`0`), each sample becomes its own message the
 moment it arrives.
 
@@ -118,11 +118,11 @@ about twenty samples arrive each cycle, so a queue of fifty is comfortable while
 **Deadband** acts before the queue. It tells the *server* to ignore changes smaller than a threshold,
 so insignificant jitter never enters the pipeline at all. An absolute deadband suppresses changes
 below a fixed amount in engineering units; a percent deadband expresses that threshold as a fraction
-of the tag's range and therefore depends on the server advertising that range. A firm deadband on a
+of the signal's range and therefore depends on the server advertising that range. A firm deadband on a
 fast sampler is often better than a slow sampler, because it preserves genuine fast transients while
 discarding noise.
 
-## Addressing tags, and a trap
+## Addressing signals, and a trap
 
 OPC UA identifies every node by a pair: a **namespace index** and an **identifier** (a string, a
 number, a GUID, or opaque bytes). The adapter selects nodes by pinning the namespace and matching the
@@ -133,7 +133,7 @@ URIs to indexes, and that mapping can change between servers and even across a r
 server. The **namespace URI is the stable identity**; the index is only a volatile handle into the
 server's current table.
 
-So configure tags by **`namespaceUri`** rather than a literal index. At connect time the adapter reads
+So configure signals by **`namespaceUri`** rather than a literal index. At connect time the adapter reads
 the server's namespace table and resolves each URI to its current index, re-resolving whenever it
 rebuilds subscriptions — so a server that renumbers after a restart is followed automatically. A
 literal `namespace` index is still accepted as a fallback for servers you know to be stable. If a
@@ -142,13 +142,13 @@ configured URI is not present on the server, that matcher is skipped with a warn
 
 There is also an asymmetry worth internalizing: an **include** matcher tests its regex against a
 node's identifier, browse name, *and* display name, while an **exclude** matcher tests only the
-identifier. The rationale is that you usually select tags by their human-readable names but exclude
+identifier. The rationale is that you usually select signals by their human-readable names but exclude
 specific ones by their stable id. The practical consequence is that an exclude rule written against a
 display name does nothing — write exclusions against the identifier.
 
 ## The southbound contract
 
-Every tag update the adapter publishes uses one envelope shape, `SouthboundTagUpdate`, defined by the
+Every signal update the adapter publishes uses one envelope shape, `SouthboundSignalUpdate`, defined by the
 cross-language *southbound contract* that all protocol adapters in this ecosystem share. The point of
 a shared contract is that a consumer written against it does not care whether the data originated from
 OPC UA, Modbus, or anything else — the message looks the same.
@@ -156,7 +156,7 @@ OPC UA, Modbus, or anything else — the message looks the same.
 Two design choices in that contract are worth calling out. First, **quality is normalized.** OPC UA
 has a rich space of status codes; the contract collapses them to `GOOD`, `BAD`, or `UNCERTAIN` so
 consumers can make decisions without an OPC UA lookup table, while preserving the native code in
-`qualityRaw` for diagnostics. Second, **identity is split** into a canonical, stable `tag.id` that
+`qualityRaw` for diagnostics. Second, **identity is split** into a canonical, stable `signal.id` that
 consumers should key on and a protocol-native `address` (`{ns, namespaceUri, nodeId}`) that
 round-trips back to the device for reads and writes. The address reports the namespace **URI**
 alongside the index, so the round-trip identity does not depend on a volatile index either.

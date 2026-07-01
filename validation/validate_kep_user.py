@@ -1,8 +1,8 @@
 """Confirm the OPC UA data plane flows under a UserName identity against KEPServerEX.
 
 The configured 'testuser' is permitted only the standard ns=0 Server diagnostics, so this watches
-Server.ServerStatus.CurrentTime (ns=0, ticks each second) and asserts SouthboundTagUpdate messages
-arrive with GOOD quality. (Subscribing to the ns=2 'Kepware Server' tags as this user requires a
+Server.ServerStatus.CurrentTime (ns=0, ticks each second) and asserts SouthboundSignalUpdate messages
+arrive with GOOD quality. (Subscribing to the ns=2 'Kepware Server' signals as this user requires a
 User Manager permission grant in KEP.)
 """
 import json
@@ -24,7 +24,7 @@ def on_message(client, userdata, msg):
         payload = json.loads(msg.payload.decode())
     except Exception:
         return
-    if payload.get("header", {}).get("name") == "SouthboundTagUpdate":
+    if payload.get("header", {}).get("name") == "SouthboundSignalUpdate":
         updates.append((msg.topic, payload))
 
 
@@ -35,16 +35,16 @@ def main():
     c.connect(BROKER_HOST, BROKER_PORT, 60)
     c.loop_start()
 
-    print("[U] waiting up to 30s for SouthboundTagUpdate under testuser...", flush=True)
+    print("[U] waiting up to 30s for SouthboundSignalUpdate under testuser...", flush=True)
     deadline = time.time() + 30
     while time.time() < deadline and len(updates) < 3:
         time.sleep(0.5)
     time.sleep(1)
 
-    tag_ids = {p["body"]["tag"]["address"].get("nodeId") for _, p in updates}
-    uris = {p["body"]["tag"]["address"].get("namespaceUri") for _, p in updates}
+    signal_ids = {p["body"]["signal"]["address"].get("nodeId") for _, p in updates}
+    uris = {p["body"]["signal"]["address"].get("namespaceUri") for _, p in updates}
     quals = {s.get("quality") for _, p in updates for s in p["body"]["samples"]}
-    print(f"[U] {len(updates)} updates, tags={sorted(str(t) for t in tag_ids)}, uris={uris}, qualities={quals}", flush=True)
+    print(f"[U] {len(updates)} updates, signals={sorted(str(t) for t in signal_ids)}, uris={uris}, qualities={quals}", flush=True)
 
     c.loop_stop()
     c.disconnect()

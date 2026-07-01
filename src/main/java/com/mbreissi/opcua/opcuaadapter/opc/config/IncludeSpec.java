@@ -6,10 +6,10 @@ import com.google.gson.JsonElement;
 import java.util.ArrayList;
 import java.util.List;
 
-/** The {@code include} list of a subscription: tag matchers to subscribe to. */
+/** The {@code include} list of a subscription: signal matchers to subscribe to. */
 public class IncludeSpec {
 
-    private final List<TagSpec> tagSpecs = new ArrayList<>();
+    private final List<SignalSpec> signalSpecs = new ArrayList<>();
 
     private IncludeSpec() {
     }
@@ -18,7 +18,7 @@ public class IncludeSpec {
         IncludeSpec include = new IncludeSpec();
         if (includeArray != null) {
             for (JsonElement element : includeArray) {
-                include.tagSpecs.add(TagSpec.fromJson(element.getAsJsonObject(),
+                include.signalSpecs.add(SignalSpec.fromJson(element.getAsJsonObject(),
                         serverConfiguration.getDefaultSamplingMs(),
                         serverConfiguration.getDefaultQueueSize()));
             }
@@ -26,7 +26,7 @@ public class IncludeSpec {
         return include;
     }
 
-    public List<TagSpec> getTagSpecs() {
-        return tagSpecs;
+    public List<SignalSpec> getSignalSpecs() {
+        return signalSpecs;
     }
 }

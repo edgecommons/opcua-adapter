@@ -7,7 +7,7 @@ import com.mbreissi.ggcommons.messaging.Message;
 import com.mbreissi.ggcommons.messaging.MessageBuilder;
 import com.mbreissi.ggcommons.messaging.MessagingClient;
 import com.mbreissi.opcua.opcuaadapter.opc.config.ServerConfiguration;
-import com.mbreissi.opcua.opcuaadapter.opc.config.TagSpec;
+import com.mbreissi.opcua.opcuaadapter.opc.config.SignalSpec;
 import org.eclipse.milo.opcua.sdk.client.nodes.UaVariableNode;
 import org.eclipse.milo.opcua.stack.core.NamespaceTable;
 import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
@@ -19,12 +19,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 
 /**
- * Builds and publishes the Tier-1 {@code SouthboundTagUpdate} envelope (docs/SOUTHBOUND.md §2) for
- * tag value changes. When {@code batchMs > 0}, value changes are buffered per node and flushed
+ * Builds and publishes the Tier-1 {@code SouthboundSignalUpdate} envelope (docs/SOUTHBOUND.md §2) for
+ * signal value changes. When {@code batchMs > 0}, value changes are buffered per node and flushed
  * together by {@link #flush()} (driven by the device's timer); otherwise each change publishes
  * immediately.
  */
-public class TagUpdatePublisher {
+public class SignalUpdatePublisher {
 
     private final MessagingClient messaging;
     private final ConfigManager config;
@@ -32,7 +32,7 @@ public class TagUpdatePublisher {
     private final NamespaceTable namespaceTable;
     private final Map<UaVariableNode, Buffer> pending = new ConcurrentHashMap<>();
 
-    public TagUpdatePublisher(MessagingClient messaging, ConfigManager config, ServerConfiguration serverConfig,
+    public SignalUpdatePublisher(MessagingClient messaging, ConfigManager config, ServerConfiguration serverConfig,
                               NamespaceTable namespaceTable) {
         this.messaging = messaging;
         this.config = config;
@@ -40,8 +40,8 @@ public class TagUpdatePublisher {
         this.namespaceTable = namespaceTable;
     }
 
-    /** Offer a value change for a tag — buffered (batch) or published immediately. */
-    public void offer(UaVariableNode node, TagSpec spec, DataValue value) {
+    /** Offer a value change for a signal — buffered (batch) or published immediately. */
+    public void offer(UaVariableNode node, SignalSpec spec, DataValue value) {
         if (serverConfig.getBatchMs() > 0) {
             pending.computeIfAbsent(node, n -> new Buffer(spec)).queue.add(value);
         } else {
@@ -60,11 +60,11 @@ public class TagUpdatePublisher {
         });
     }
 
-    private void publish(UaVariableNode node, TagSpec spec, List<DataValue> values) {
+    private void publish(UaVariableNode node, SignalSpec spec, List<DataValue> values) {
         if (values.isEmpty()) {
             return;
         }
-        String tagId = node.getNodeId().getIdentifier().toString();
+        String signalId = node.getNodeId().getIdentifier().toString();
         String browseName = node.getBrowseName() != null && node.getBrowseName().getName() != null
                 ? node.getBrowseName().getName() : "";
         String displayName = node.getDisplayName() != null && node.getDisplayName().getText() != null
@@ -75,10 +75,10 @@ public class TagUpdatePublisher {
         device.addProperty("instance", serverConfig.getId());
         device.addProperty("endpoint", serverConfig.getConnection().getEndpoint());
 
-        JsonObject tag = new JsonObject();
-        tag.addProperty("id", node.getNodeId().toParseableString());
-        tag.addProperty("name", !displayName.isEmpty() ? displayName : browseName);
-        tag.add("address", ValueCodec.address(node.getNodeId(), namespaceTable));
+        JsonObject signal = new JsonObject();
+        signal.addProperty("id", node.getNodeId().toParseableString());
+        signal.addProperty("name", !displayName.isEmpty() ? displayName : browseName);
+        signal.add("address", ValueCodec.address(node.getNodeId(), namespaceTable));
 
         JsonArray samples = new JsonArray();
         for (DataValue value : values) {
@@ -87,22 +87,22 @@ public class TagUpdatePublisher {
 
         JsonObject body = new JsonObject();
         body.add("device", device);
-        body.add("tag", tag);
+        body.add("signal", signal);
         body.add("samples", samples);
 
-        Message message = MessageBuilder.create("SouthboundTagUpdate", "1.0")
+        Message message = MessageBuilder.create("SouthboundSignalUpdate", "1.0")
                 .withPayload(body)
                 .withConfig(config)
                 .build();
-        String topic = serverConfig.resolvePublishTopic(spec != null ? spec.getTopic() : null, tagId);
+        String topic = serverConfig.resolvePublishTopic(spec != null ? spec.getTopic() : null, signalId);
         messaging.publish(topic, message);
     }
 
     private static final class Buffer {
-        final TagSpec spec;
+        final SignalSpec spec;
         final LinkedBlockingQueue<DataValue> queue = new LinkedBlockingQueue<>();
 
-        Buffer(TagSpec spec) {
+        Buffer(SignalSpec spec) {
             this.spec = spec;
         }
     }

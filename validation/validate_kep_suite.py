@@ -9,10 +9,10 @@ Then: python validation/validate_kep_suite.py
 Covers, against real KEP tags (ns=2 "Kepware Server", id "GGCommonsTest.Device1.<name>"):
   - data-type mapping on subscribe (Boolean/SByte/Byte/Int16/UInt16/Int32/UInt32/Int64/UInt64/Float/Double/String)
   - changing values from simulator functions (RAMP/SINE/USER)
-  - include/exclude filtering and per-tag topic override
+  - include/exclude filtering and per-signal topic override
   - batch write -> batch read round-trip for every writable type
   - addressing by namespaceUri vs literal ns index
-  - error handling (unknown tag omitted; bad namespaceUri tolerated)
+  - error handling (unknown signal omitted; bad namespaceUri tolerated)
   - control plane (status, subscriptions) + health metric + quality normalization
 """
 import json
@@ -75,15 +75,15 @@ def on_message(c, u, msg):
 
 
 def updates():
-    return [(t, p) for t, p in msgs if p.get("header", {}).get("name") == "SouthboundTagUpdate"]
+    return [(t, p) for t, p in msgs if p.get("header", {}).get("name") == "SouthboundSignalUpdate"]
 
 
 def node_of(p):
-    return p.get("body", {}).get("tag", {}).get("address", {}).get("nodeId")
+    return p.get("body", {}).get("signal", {}).get("address", {}).get("nodeId")
 
 
 def samples_for(name):
-    """All (topic, sample) seen for a tag, across the run."""
+    """All (topic, sample) seen for a signal, across the run."""
     out = []
     for t, p in updates():
         if node_of(p) == PREFIX + name:
@@ -127,7 +127,7 @@ def main():
     c.connect(BROKER_HOST, BROKER_PORT, 60)
     c.loop_start()
 
-    # --- wait for the adapter to connect + publish a spread of the new tags ---------------
+    # --- wait for the adapter to connect + publish a spread of the new signals ---------------
     print("[*] waiting up to 45s for GGCommonsTest updates...", flush=True)
     deadline = time.time() + 45
     while time.time() < deadline:
@@ -137,7 +137,7 @@ def main():
         time.sleep(0.5)
     seen = {node_of(p) for _, p in updates() if (node_of(p) or "").startswith(PREFIX)}
     if len(seen) < 4:
-        print(f"[!] only {len(seen)} GGCommonsTest tags seen; is the adapter running on config-kep-suite.json?", flush=True)
+        print(f"[!] only {len(seen)} GGCommonsTest signals seen; is the adapter running on config-kep-suite.json?", flush=True)
         summarize()
         return
 
@@ -156,28 +156,28 @@ def main():
     write_topic = f"southbound/{comp}/{inst}/write"
     print(f"[*] component={comp} instance={inst}", flush=True)
 
-    # --- subscribe stream active (the live simulator tags keep publishing) ----------------
-    check("subscribe", "tag-update stream active", len(updates()) > 0, f"{len(updates())} updates collected")
+    # --- subscribe stream active (the live simulator signals keep publishing) ----------------
+    check("subscribe", "signal-update stream active", len(updates()) > 0, f"{len(updates())} updates collected")
 
     # --- T1: data-type mapping (on-demand read of every supported type) -------------------
-    rp = request(c, read_topic, "ReadTags", {"tags": [{"namespaceUri": NS, "tagId": PREFIX + n} for n in TYPES]})
+    rp = request(c, read_topic, "ReadSignals", {"signals": [{"namespaceUri": NS, "signalId": PREFIX + n} for n in TYPES]})
     t1 = {node_of_read(e): e for e in (rp.get("body", {}).get("reads", []) if rp else [])}
     for name in TYPES:
         e = t1.get(PREFIX + name)
         if not e:
             check("types/read", name, False, "missing from read")
             continue
-        v, q, addr = e.get("value"), e.get("quality"), e.get("tag", {}).get("address", {})
+        v, q, addr = e.get("value"), e.get("quality"), e.get("signal", {}).get("address", {})
         ok = TYPE_CHECK[name](v) and q == "GOOD" and addr.get("namespaceUri") == NS and addr.get("ns") is not None
         check("types/read", name, ok, f"value={v!r} q={q} ns={addr.get('ns')}")
 
     # --- T2/T3/T4: batch write every writable type, then batch read back ------------------
-    writes = [{"namespaceUri": NS, "tagId": PREFIX + n, "value": WRITE[n]} for n in TYPES]
-    _, w = envelope("WriteTags", {"writes": writes})
+    writes = [{"namespaceUri": NS, "signalId": PREFIX + n, "value": WRITE[n]} for n in TYPES]
+    _, w = envelope("WriteSignals", {"writes": writes})
     c.publish(write_topic, w)
     time.sleep(2.5)
-    rp = request(c, read_topic, "ReadTags",
-                 {"tags": [{"namespaceUri": NS, "tagId": PREFIX + n} for n in TYPES]})
+    rp = request(c, read_topic, "ReadSignals",
+                 {"signals": [{"namespaceUri": NS, "signalId": PREFIX + n} for n in TYPES]})
     got = {}
     if rp:
         for e in rp.get("body", {}).get("reads", []):
@@ -210,11 +210,11 @@ def main():
         "DoubleArray": ("num",  [1.25, 2.5, 3.75, 4.0]),
         "StringArray": ("str",  ["alpha", "beta", "gamma", "delta"]),
     }
-    awrites = [{"namespaceUri": NS, "tagId": PREFIX + n, "value": v} for n, (_, v) in ARRAYS.items()]
-    _, aw = envelope("WriteTags", {"writes": awrites})
+    awrites = [{"namespaceUri": NS, "signalId": PREFIX + n, "value": v} for n, (_, v) in ARRAYS.items()]
+    _, aw = envelope("WriteSignals", {"writes": awrites})
     c.publish(write_topic, aw)
     time.sleep(2.5)
-    rp = request(c, read_topic, "ReadTags", {"tags": [{"namespaceUri": NS, "tagId": PREFIX + n} for n in ARRAYS]})
+    rp = request(c, read_topic, "ReadSignals", {"signals": [{"namespaceUri": NS, "signalId": PREFIX + n} for n in ARRAYS]})
     agot = {node_of_read(e): e for e in (rp.get("body", {}).get("reads", []) if rp else [])}
 
     def elem_ok(x, kind):
@@ -237,7 +237,7 @@ def main():
         check("arrays/write", name, rt, f"wrote {expected!r} -> read {v!r}")
 
     # --- DateTime: read as clean ISO-8601, not a debug toString ---------------------------
-    rp = request(c, read_topic, "ReadTags", {"tags": [{"namespaceUri": NS, "tagId": "_System._DateTime"}]})
+    rp = request(c, read_topic, "ReadSignals", {"signals": [{"namespaceUri": NS, "signalId": "_System._DateTime"}]})
     dt = next((e.get("value") for e in (rp.get("body", {}).get("reads", []) if rp else [])), None)
     parsed = False
     if isinstance(dt, str) and "DateTime{" not in dt:
@@ -249,19 +249,19 @@ def main():
     check("datetime", "DateTime read as ISO-8601", parsed, f"{dt!r}")
 
     # --- T6: addressing by namespaceUri vs literal ns index ------------------------------
-    rp = request(c, read_topic, "ReadTags", {"tags": [
-        {"namespaceUri": NS, "tagId": PREFIX + "Int32"},
-        {"ns": 2, "tagId": PREFIX + "Int32"},
+    rp = request(c, read_topic, "ReadSignals", {"signals": [
+        {"namespaceUri": NS, "signalId": PREFIX + "Int32"},
+        {"ns": 2, "signalId": PREFIX + "Int32"},
     ]})
     vals = [e.get("value") for e in (rp.get("body", {}).get("reads", []) if rp else [])]
     check("addressing", "namespaceUri == ns index", len(vals) == 2 and vals[0] == vals[1], f"{vals}")
 
     # --- T7: error handling --------------------------------------------------------------
     # unresolvable namespaceUri -> omitted from reads; non-existent node (valid ns) -> present, non-GOOD
-    rp = request(c, read_topic, "ReadTags", {"tags": [
-        {"namespaceUri": NS, "tagId": PREFIX + "Int32"},
-        {"namespaceUri": "urn:bogus:ns", "tagId": PREFIX + "Int32"},
-        {"namespaceUri": NS, "tagId": PREFIX + "DoesNotExist"},
+    rp = request(c, read_topic, "ReadSignals", {"signals": [
+        {"namespaceUri": NS, "signalId": PREFIX + "Int32"},
+        {"namespaceUri": "urn:bogus:ns", "signalId": PREFIX + "Int32"},
+        {"namespaceUri": NS, "signalId": PREFIX + "DoesNotExist"},
     ]})
     reads = rp.get("body", {}).get("reads", []) if rp else []
     entries = {node_of_read(e): e for e in reads}
@@ -272,10 +272,10 @@ def main():
     check("errors", "non-existent node -> non-GOOD",
           bool(missing) and missing.get("quality") != "GOOD", f"q={missing.get('quality') if missing else None}")
     # bad namespaceUri on a write must not crash the adapter
-    _, bw = envelope("WriteTags", {"writes": [{"namespaceUri": "urn:bogus:ns", "tagId": "X", "value": 1}]})
+    _, bw = envelope("WriteSignals", {"writes": [{"namespaceUri": "urn:bogus:ns", "signalId": "X", "value": 1}]})
     c.publish(write_topic, bw)
     time.sleep(1)
-    rp = request(c, read_topic, "ReadTags", {"tags": [{"namespaceUri": NS, "tagId": PREFIX + "Int32"}]})
+    rp = request(c, read_topic, "ReadSignals", {"signals": [{"namespaceUri": NS, "signalId": PREFIX + "Int32"}]})
     check("errors", "adapter alive after bad write", rp is not None and len(rp.get("body", {}).get("reads", [])) == 1)
 
     # --- give live values time to accumulate, then T2 changing / filter / topic ----------
@@ -292,7 +292,7 @@ def main():
 
     # filter: LiveRandom is excluded -> never published
     check("filter", "LiveRandom excluded", not samples_for("LiveRandom"), f"{len(samples_for('LiveRandom'))} seen")
-    # per-tag topic override: LiveSine routed to ggtest/live/*
+    # per-signal topic override: LiveSine routed to ggtest/live/*
     check("filter", "LiveSine topic override",
           bool(sine) and all(t.startswith("ggtest/live/") for t, _ in sine), f"topics={sorted({t for t,_ in sine})}")
 
@@ -301,11 +301,11 @@ def main():
     sb = st.get("body", {}) if st else {}
     check("control", "status connected+metrics", bool(sb.get("connected")) and "metrics" in sb, f"{sb.get('connected')}")
     subq = request(c, f"southbound/{comp}/{inst}/control/subscriptions", "subscriptions", {})
-    stags = subq.get("body", {}).get("tags", []) if subq else []
-    names = {t.get("tagId") for t in stags}
-    has_uri = all(t.get("namespaceUri") == NS for t in stags) and len(stags) > 0
-    check("control", "subscriptions list + URIs", len(names) >= 8 and has_uri, f"{len(names)} tags")
-    check("control", "excluded tag not subscribed", PREFIX + "LiveRandom" not in names)
+    ssignals = subq.get("body", {}).get("signals", []) if subq else []
+    names = {t.get("signalId") for t in ssignals}
+    has_uri = all(t.get("namespaceUri") == NS for t in ssignals) and len(ssignals) > 0
+    check("control", "subscriptions list + URIs", len(names) >= 8 and has_uri, f"{len(names)} signals")
+    check("control", "excluded signal not subscribed", PREFIX + "LiveRandom" not in names)
 
     # --- T9: health metric + quality -----------------------------------------------------
     check("health", "southbound_health metric emitted",
@@ -321,7 +321,7 @@ def main():
 
 
 def node_of_read(e):
-    return e.get("tag", {}).get("address", {}).get("nodeId")
+    return e.get("signal", {}).get("address", {}).get("nodeId")
 
 
 def summarize():

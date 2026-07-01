@@ -48,7 +48,7 @@ public class ServerConfiguration {
         JsonObject publish = inst.has("publish") ? inst.getAsJsonObject("publish") : new JsonObject();
         this.publishTopicTemplate = publish.has("topic")
                 ? publish.get("topic").getAsString()
-                : "southbound/{ComponentName}/{InstanceId}/{tagId}";
+                : "southbound/{ComponentName}/{InstanceId}/{signalId}";
         this.batchMs = publish.has("batchMs") ? publish.get("batchMs").getAsLong() : (long) defaultPublishIntervalMs;
 
         JsonObject write = inst.has("write") ? inst.getAsJsonObject("write") : new JsonObject();
@@ -125,10 +125,10 @@ public class ServerConfiguration {
         return subscriptionSpecs;
     }
 
-    /** Resolve the per-tag publish topic, substituting the standard template vars plus {@code {tagId}}. */
-    public String resolvePublishTopic(String overrideTemplate, String tagId) {
+    /** Resolve the per-signal publish topic, substituting the standard template vars plus {@code {signalId}}. */
+    public String resolvePublishTopic(String overrideTemplate, String signalId) {
         String template = overrideTemplate != null ? overrideTemplate : publishTopicTemplate;
-        return resolveTemplate(template).replace("{tagId}", tagId);
+        return resolveTemplate(template).replace("{signalId}", signalId);
     }
 
     /** Resolve template vars ({ThingName}, {ComponentName}, configured tags) plus the app-local {InstanceId}. */

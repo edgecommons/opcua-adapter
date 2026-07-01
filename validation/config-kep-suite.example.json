@@ -9,7 +9,7 @@
   "component": {
     "global": {
       "defaults": { "publishIntervalMs": 500, "samplingRateMs": 200, "queueSize": 20 },
-      "healthThresholds": { "staleTagSecs": 30 }
+      "healthThresholds": { "staleSignalSecs": 30 }
     },
     "instances": [
       {
@@ -20,14 +20,14 @@
           "securityPolicy": "None",
           "user": { "username": "<kep-ua-user>", "password": "<password>" }
         },
-        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{tagId}", "batchMs": 0 },
+        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 0 },
         "write": { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
         "read": { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
         "subscriptions": [
           {
             "id": "main",
             "include": [
-              { "namespaceUri": "Kepware Server", "match": "^GGCommonsTest\\.Device1\\.LiveSine$", "topic": "ggtest/live/{tagId}", "samplingRateMs": 200, "queueSize": 20 },
+              { "namespaceUri": "Kepware Server", "match": "^GGCommonsTest\\.Device1\\.LiveSine$", "topic": "ggtest/live/{signalId}", "samplingRateMs": 200, "queueSize": 20 },
               { "namespaceUri": "Kepware Server", "match": "^GGCommonsTest\\.Device1\\..*", "samplingRateMs": 200, "queueSize": 20 }
             ],
             "exclude": [

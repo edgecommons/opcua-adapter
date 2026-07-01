@@ -8,7 +8,7 @@
   "component": {
     "global": {
       "defaults": { "publishIntervalMs": 1000, "samplingRateMs": 500, "queueSize": 10 },
-      "healthThresholds": { "staleTagSecs": 30 }
+      "healthThresholds": { "staleSignalSecs": 30 }
     },
     "instances": [
       {
@@ -24,7 +24,7 @@
             "serverCertificate": { "source": "file", "path": "validation/certs/kep_server_cert.pem" }
           }
         },
-        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{tagId}", "batchMs": 1000 },
+        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 1000 },
         "write": { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
         "read": { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
         "subscriptions": [

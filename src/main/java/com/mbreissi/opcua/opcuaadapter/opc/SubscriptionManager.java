@@ -3,7 +3,7 @@ package com.mbreissi.opcua.opcuaadapter.opc;
 import com.mbreissi.opcua.opcuaadapter.opc.config.DeadbandSpec;
 import com.mbreissi.opcua.opcuaadapter.opc.config.ServerConfiguration;
 import com.mbreissi.opcua.opcuaadapter.opc.config.SubscriptionSpec;
-import com.mbreissi.opcua.opcuaadapter.opc.config.TagSpec;
+import com.mbreissi.opcua.opcuaadapter.opc.config.SignalSpec;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
@@ -30,10 +30,10 @@ import static org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.
 
 /**
  * Creates and maintains the OPC UA subscriptions for one device: matches address-space nodes to the
- * configured include/exclude tag specs, creates monitored items (with deadband), and routes value
- * changes to the {@link TagUpdatePublisher}. Re-establishes a subscription on transfer failure.
+ * configured include/exclude signal specs, creates monitored items (with deadband), and routes value
+ * changes to the {@link SignalUpdatePublisher}. Re-establishes a subscription on transfer failure.
  *
- * <p>A tag spec selects its namespace by URI (resolved to the server's current index from the live
+ * <p>A signal spec selects its namespace by URI (resolved to the server's current index from the live
  * namespace table) or by a literal index. Resolution happens here, each time subscriptions are built,
  * so a server that renumbers between connections is picked up automatically.
  */
@@ -44,15 +44,15 @@ public class SubscriptionManager {
     private final OpcUaClient client;
     private final ServerConfiguration config;
     private final Map<NodeId, UaVariableNode> allNodes;
-    private final TagUpdatePublisher publisher;
+    private final SignalUpdatePublisher publisher;
     private final ClientMetrics counters;
 
     private final Map<OpcUaSubscription, SubscriptionSpec> subscriptions = new HashMap<>();
-    private final Map<String, ResolvedTag> resolvedTags = new ConcurrentHashMap<>();
+    private final Map<String, ResolvedSignal> resolvedSignals = new ConcurrentHashMap<>();
 
     public SubscriptionManager(OpcUaClient client, ServerConfiguration config,
                                Map<NodeId, UaVariableNode> allNodes,
-                               TagUpdatePublisher publisher, ClientMetrics counters) {
+                               SignalUpdatePublisher publisher, ClientMetrics counters) {
         this.client = client;
         this.config = config;
         this.allNodes = allNodes;
@@ -60,8 +60,8 @@ public class SubscriptionManager {
         this.counters = counters;
     }
 
-    public Map<String, ResolvedTag> getResolvedTags() {
-        return resolvedTags;
+    public Map<String, ResolvedSignal> getResolvedSignals() {
+        return resolvedSignals;
     }
 
     public void createAll() {
@@ -85,13 +85,13 @@ public class SubscriptionManager {
                 }
             });
 
-            Map<UaVariableNode, TagSpec> matching = filter(spec);
+            Map<UaVariableNode, SignalSpec> matching = filter(spec);
             List<OpcUaMonitoredItem> items = new ArrayList<>();
-            matching.forEach((node, tagSpec) -> {
+            matching.forEach((node, signalSpec) -> {
                 OpcUaMonitoredItem item = OpcUaMonitoredItem.newDataItem(node.getNodeId());
-                item.setSamplingInterval(tagSpec.getSamplingRateMs());
-                item.setQueueSize(uint(tagSpec.getQueueSize()));
-                DeadbandSpec deadband = tagSpec.getDeadband();
+                item.setSamplingInterval(signalSpec.getSamplingRateMs());
+                item.setQueueSize(uint(signalSpec.getQueueSize()));
+                DeadbandSpec deadband = signalSpec.getDeadband();
                 if (deadband.getType() != DeadbandType.None) {
                     item.setFilter(new DataChangeFilter(
                             DataChangeTrigger.StatusValue,
@@ -100,10 +100,10 @@ public class SubscriptionManager {
                 }
                 item.setDataValueListener((it, value) -> {
                     counters.incrementReadMetrics();
-                    publisher.offer(node, tagSpec, value);
+                    publisher.offer(node, signalSpec, value);
                 });
                 items.add(item);
-                resolvedTags.put(node.getNodeId().getIdentifier().toString(), new ResolvedTag(node.getNodeId(), tagSpec));
+                resolvedSignals.put(node.getNodeId().getIdentifier().toString(), new ResolvedSignal(node.getNodeId(), signalSpec));
             });
 
             subscription.addMonitoredItems(items);
@@ -128,20 +128,20 @@ public class SubscriptionManager {
         }
     }
 
-    private Map<UaVariableNode, TagSpec> filter(SubscriptionSpec spec) {
-        Map<TagSpec, Integer> includeNs = resolveNamespaces(spec.getIncludeSpec().getTagSpecs());
-        Map<TagSpec, Integer> excludeNs = spec.getExcludeSpec() != null
-                ? resolveNamespaces(spec.getExcludeSpec().getTagSpecs())
+    private Map<UaVariableNode, SignalSpec> filter(SubscriptionSpec spec) {
+        Map<SignalSpec, Integer> includeNs = resolveNamespaces(spec.getIncludeSpec().getSignalSpecs());
+        Map<SignalSpec, Integer> excludeNs = spec.getExcludeSpec() != null
+                ? resolveNamespaces(spec.getExcludeSpec().getSignalSpecs())
                 : new IdentityHashMap<>();
 
-        Map<UaVariableNode, TagSpec> matching = new LinkedHashMap<>();
+        Map<UaVariableNode, SignalSpec> matching = new LinkedHashMap<>();
         for (UaVariableNode node : allNodes.values()) {
-            TagSpec include = matchTag(node, spec.getIncludeSpec().getTagSpecs(), includeNs, true);
+            SignalSpec include = matchSignal(node, spec.getIncludeSpec().getSignalSpecs(), includeNs, true);
             if (include == null) {
                 continue;
             }
             if (spec.getExcludeSpec() != null
-                    && matchTag(node, spec.getExcludeSpec().getTagSpecs(), excludeNs, false) != null) {
+                    && matchSignal(node, spec.getExcludeSpec().getSignalSpecs(), excludeNs, false) != null) {
                 continue;
             }
             matching.put(node, include);
@@ -150,13 +150,13 @@ public class SubscriptionManager {
     }
 
     /**
-     * Resolve each tag spec's namespace to an effective index: a {@code namespaceUri} is looked up in
+     * Resolve each signal spec's namespace to an effective index: a {@code namespaceUri} is looked up in
      * the server's current namespace table; otherwise the literal {@code namespace} is used. An
      * unresolved URI maps to {@code -1} (the matcher is skipped, with a warning).
      */
-    private Map<TagSpec, Integer> resolveNamespaces(List<TagSpec> specs) {
-        Map<TagSpec, Integer> result = new IdentityHashMap<>();
-        for (TagSpec spec : specs) {
+    private Map<SignalSpec, Integer> resolveNamespaces(List<SignalSpec> specs) {
+        Map<SignalSpec, Integer> result = new IdentityHashMap<>();
+        for (SignalSpec spec : specs) {
             int ns;
             if (spec.getNamespaceUri() != null) {
                 UShort idx = client.getNamespaceTable().getIndex(spec.getNamespaceUri());
@@ -173,14 +173,14 @@ public class SubscriptionManager {
         return result;
     }
 
-    /** Match a node against tag specs by resolved namespace index + regex over nodeId / browseName / displayName. */
-    private TagSpec matchTag(UaVariableNode node, List<TagSpec> specs, Map<TagSpec, Integer> nsBySpec, boolean matchNames) {
+    /** Match a node against signal specs by resolved namespace index + regex over nodeId / browseName / displayName. */
+    private SignalSpec matchSignal(UaVariableNode node, List<SignalSpec> specs, Map<SignalSpec, Integer> nsBySpec, boolean matchNames) {
         String idStr = node.getNodeId().getIdentifier().toString();
         String browseName = node.getBrowseName() != null && node.getBrowseName().getName() != null
                 ? node.getBrowseName().getName() : "";
         String displayName = node.getDisplayName() != null && node.getDisplayName().getText() != null
                 ? node.getDisplayName().getText() : "";
-        for (TagSpec spec : specs) {
+        for (SignalSpec spec : specs) {
             int ns = nsBySpec.getOrDefault(spec, -1);
             if (ns < 0 || !node.getNodeId().getNamespaceIndex().equals(ushort(ns))) {
                 continue;

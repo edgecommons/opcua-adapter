@@ -1,12 +1,12 @@
 """Smoke-validate the OPC UA adapter end-to-end against a live KEPServerEX over EMQX.
 
-Targets KEP's built-in system tags (no device channels required):
-  Phase A: subscribe to _System._Time* (ticks every second) -> SouthboundTagUpdate, GOOD quality,
-           and the stable namespaceUri ("Kepware Server") carried in tag.address.
+Targets KEP's built-in system signals (no device channels required):
+  Phase A: subscribe to _System._Time* (ticks every second) -> SouthboundSignalUpdate, GOOD quality,
+           and the stable namespaceUri ("Kepware Server") carried in signal.address.
   Phase B: on-demand read of _System._ProductName + _System._ActiveTagCount, addressed by
            namespaceUri (not a literal index) -> SouthboundReadResult.
 
-Write (Phase C) is intentionally omitted: _System.* tags are read-only. Add a writable tag on a
+Write (Phase C) is intentionally omitted: _System.* signals are read-only. Add a writable signal on a
 Channel/Device in KEP to exercise the write path.
 """
 import json
@@ -21,7 +21,7 @@ BROKER_HOST, BROKER_PORT = "localhost", 1883
 REPLY_TOPIC = "southbound/reply/kep"
 NS_URI = "Kepware Server"
 
-updates = []   # SouthboundTagUpdate
+updates = []   # SouthboundSignalUpdate
 reads = []     # SouthboundReadResult
 
 
@@ -35,7 +35,7 @@ def on_message(client, userdata, msg):
     except Exception:
         return
     name = payload.get("header", {}).get("name")
-    if name == "SouthboundTagUpdate":
+    if name == "SouthboundSignalUpdate":
         updates.append((msg.topic, payload))
     elif name == "SouthboundReadResult":
         reads.append(payload)
@@ -62,20 +62,20 @@ def main():
 
     results = {}
 
-    # ---- Phase A: observe ticking system-clock tags ---------------------------------------
-    print("[A] waiting up to 45s for first SouthboundTagUpdate from KEP...", flush=True)
+    # ---- Phase A: observe ticking system-clock signals ---------------------------------------
+    print("[A] waiting up to 45s for first SouthboundSignalUpdate from KEP...", flush=True)
     deadline = time.time() + 45
     while time.time() < deadline and len(updates) < 4:
         time.sleep(0.5)
     time.sleep(2)
-    tag_ids = {p["body"]["tag"]["address"].get("nodeId") for _, p in updates}
-    uris = {p["body"]["tag"]["address"].get("namespaceUri") for _, p in updates}
+    signal_ids = {p["body"]["signal"]["address"].get("nodeId") for _, p in updates}
+    uris = {p["body"]["signal"]["address"].get("namespaceUri") for _, p in updates}
     qualities = {s.get("quality") for _, p in updates for s in p["body"]["samples"]}
     results["A_updates_received"] = len(updates) > 0
-    results["A_has_time_tags"] = any(t and t.startswith("_System._Time") for t in tag_ids)
+    results["A_has_time_signals"] = any(t and t.startswith("_System._Time") for t in signal_ids)
     results["A_namespaceUri_in_address"] = NS_URI in uris
     results["A_quality_good"] = "GOOD" in qualities
-    print(f"[A] {len(updates)} updates, tags={sorted(t for t in tag_ids if t)}", flush=True)
+    print(f"[A] {len(updates)} updates, signals={sorted(t for t in signal_ids if t)}", flush=True)
     print(f"[A] namespaceUris={uris}, qualities={qualities}", flush=True)
 
     if not updates:
@@ -91,21 +91,21 @@ def main():
     # ---- Phase B: on-demand read addressed by namespaceUri --------------------------------
     print("[B] read _System._ProductName + _System._ActiveTagCount by namespaceUri...", flush=True)
     reads.clear()
-    _, req = envelope("ReadTags",
-                      {"tags": [{"namespaceUri": NS_URI, "tagId": "_System._ProductName"},
-                                {"namespaceUri": NS_URI, "tagId": "_System._ActiveTagCount"}]},
+    _, req = envelope("ReadSignals",
+                      {"signals": [{"namespaceUri": NS_URI, "signalId": "_System._ProductName"},
+                                {"namespaceUri": NS_URI, "signalId": "_System._ActiveTagCount"}]},
                       reply_to=REPLY_TOPIC)
     c.publish(read_topic, req)
     time.sleep(3)
-    read_entries = {e["tag"]["address"].get("nodeId"): e for r in reads for e in r.get("body", {}).get("reads", [])}
+    read_entries = {e["signal"]["address"].get("nodeId"): e for r in reads for e in r.get("body", {}).get("reads", [])}
     results["B_read_reply_received"] = len(reads) > 0
     results["B_read_has_both"] = {"_System._ProductName", "_System._ActiveTagCount"}.issubset(read_entries.keys())
     pn = read_entries.get("_System._ProductName", {})
-    results["B_read_resolved_uri"] = pn.get("tag", {}).get("address", {}).get("namespaceUri") == NS_URI
-    print(f"[B] reply(s)={len(reads)}, tags={sorted(read_entries.keys())}", flush=True)
+    results["B_read_resolved_uri"] = pn.get("signal", {}).get("address", {}).get("namespaceUri") == NS_URI
+    print(f"[B] reply(s)={len(reads)}, signals={sorted(read_entries.keys())}", flush=True)
     if pn:
         print(f"[B] _System._ProductName = {pn.get('value')!r} ({pn.get('quality')}), "
-              f"address={pn.get('tag', {}).get('address')}", flush=True)
+              f"address={pn.get('signal', {}).get('address')}", flush=True)
 
     c.loop_stop()
     c.disconnect()

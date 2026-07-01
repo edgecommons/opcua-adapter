@@ -1,6 +1,6 @@
 # OPC UA Adapter — Documentation
 
-`com.mbreissi.opcua.OpcUaAdapter` connects to OPC UA servers and bridges their tags onto a message
+`com.mbreissi.opcua.OpcUaAdapter` connects to OPC UA servers and bridges their signals onto a message
 bus: it streams value changes as structured messages and serves on-demand reads, writes, and
 management queries. Built on the `ggcommons` library and Eclipse Milo, it runs wherever you deploy it
 — as a Greengrass v2 component, a standalone process, or a Kubernetes pod.
@@ -8,7 +8,7 @@ management queries. Built on the `ggcommons` library and Eclipse Milo, it runs w
 | Doc | Start here when you want to… |
 |-----|------------------------------|
 | **[Tutorial](tutorial.md)** | learn by doing — bring the adapter up against a simulator, end to end |
-| **[How-to guides](how-to-guides.md)** | accomplish a specific task — secure a connection, select tags, read/write, deploy |
+| **[How-to guides](how-to-guides.md)** | accomplish a specific task — secure a connection, select signals, read/write, deploy |
 | **[Reference](reference/)** | look up an exact option, topic, or payload |
 | **[Explanation](explanation.md)** | understand how it works and why — the timing pipeline, the two planes, the security model |
 

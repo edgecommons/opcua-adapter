@@ -23,7 +23,7 @@ data:
             "id": "device-1",
             "adapter": "opcua",
             "connection": { "endpoint": "opc.tcp://opcua.default.svc.cluster.local:4840/", "securityPolicy": "None" },
-            "publish": { "topic": "southbound/{ComponentName}/{InstanceId}/{tagId}", "batchMs": 1000 },
+            "publish": { "topic": "southbound/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 1000 },
             "subscriptions": [
               { "id": "all", "include": [ { "namespace": 0, "match": ".*" } ] }
             ]

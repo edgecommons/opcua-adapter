@@ -1,7 +1,7 @@
 # Validation harness (OPC UA adapter smoke tests)
 
 Reproducible end-to-end smoke tests: a Python **asyncua** OPC UA simulator + an MQTT test client
-drive the built adapter and verify three behaviors — **subscribe → `SouthboundTagUpdate`**,
+drive the built adapter and verify three behaviors — **subscribe → `SouthboundSignalUpdate`**,
 **on-demand batch read**, and **batch write** — for both **plaintext** and **secure**
 (`Basic256Sha256`/`SignAndEncrypt`) connections.
 
@@ -38,7 +38,7 @@ python validation/validate.py                                  # ALL PASS expect
 
 | Phase | Verifies |
 |---|---|
-| A | browse + subscribe + filtering + `SouthboundTagUpdate` envelope + normalized quality |
+| A | browse + subscribe + filtering + `SouthboundSignalUpdate` envelope + normalized quality |
 | B | on-demand batch read (request/reply → `SouthboundReadResult`) |
 | C | batch write (Setpoint=42.5) confirmed by reading it back |
 
@@ -47,7 +47,7 @@ python validation/validate.py                                  # ALL PASS expect
 These run against a real KEPServerEX (no asyncua sim). First open the OPC UA port through the KEP
 host's firewall and note the endpoint (default `opc.tcp://<host>:49320`).
 
-**Discover** the server's endpoints, namespaces, and a sample of its tags (drives the config — no
+**Discover** the server's endpoints, namespaces, and a sample of its signals (drives the config — no
 guessing):
 
 ```bash
@@ -55,7 +55,7 @@ python validation/kep_discover.py opc.tcp://<host>:49320
 ```
 
 **Anonymous data plane** (requires a `None` endpoint + *Allow anonymous login* on KEP). `config-kep.json`
-subscribes to the built-in `_System._Time*` tags (which tick each second) by the stable namespace URI
+subscribes to the built-in `_System._Time*` signals (which tick each second) by the stable namespace URI
 (`"Kepware Server"`):
 
 ```bash
@@ -77,7 +77,7 @@ python validation/validate_kep_user.py       # data flows under the UserName ide
 The server applies that user's authorization — an under-privileged account may browse only part of the
 address space.
 
-**Write.** KEP's `_System.*` tags are read-only, so the write path needs a writable tag on a
+**Write.** KEP's `_System.*` signals are read-only, so the write path needs a writable signal on a
 Channel/Device. With one present (e.g. `Channel1.Device1.Tag2`), `validate_kep_write.py` reads it,
 writes a new value of the same type, and reads it back to confirm the write landed (the account needs
 write permission):
@@ -124,7 +124,7 @@ python validation/validate_kep_suite.py        # 41 checks; ALL PASS
 
 It verifies: each data type (Boolean, SByte, Byte, Int16/32/64, UInt16/32/64, Float, Double, String)
 on read and on write→read-back; changing values from `RAMP`/`SINE`/`USER` simulator functions;
-include/exclude filtering; per-tag topic override; batch read/write; `namespaceUri`-vs-index
+include/exclude filtering; per-signal topic override; batch read/write; `namespaceUri`-vs-index
 addressing; error handling (unresolvable URI omitted, missing node → `BAD`); the status/subscriptions
 control queries; the `southbound_health` metric; and quality normalization.
 
@@ -158,7 +158,7 @@ python validation/validate_multi.py        # both stream concurrently + route in
 
 It checks both instances stream at once with the correct per-instance identity (`device.instance` /
 `device.endpoint` / `namespaceUri`), publish to distinct `{InstanceId}` topics, and that an on-demand
-read on each instance's topic resolves only that server's tags. Instances are **independent**: if one
+read on each instance's topic resolves only that server's signals. Instances are **independent**: if one
 server is unreachable its worker retries every 5s without affecting the others (verified — the sim
 kept streaming while the KEP server was down).
 

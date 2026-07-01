@@ -1,7 +1,7 @@
-"""Write -> read-back a single KEP tag through the adapter, to validate the write path.
+"""Write -> read-back a single KEP signal through the adapter, to validate the write path.
 
-Reads the tag's current value (to learn its type), writes a new value of the same type, then reads it
-back and asserts it changed. Tag + namespace are set below.
+Reads the signal's current value (to learn its type), writes a new value of the same type, then reads it
+back and asserts it changed. Signal + namespace are set below.
 """
 import json
 import sys
@@ -14,7 +14,7 @@ import paho.mqtt.client as mqtt
 BROKER_HOST, BROKER_PORT = "localhost", 1883
 REPLY = "southbound/reply/kepwrite"
 NS = "Kepware Server"
-TAG = "Channel1.Device1.Tag2"
+SIGNAL = "Channel1.Device1.Tag2"
 
 updates = []
 reads = []
@@ -30,7 +30,7 @@ def on_message(c, u, msg):
     except Exception:
         return
     n = pl.get("header", {}).get("name")
-    if n == "SouthboundTagUpdate":
+    if n == "SouthboundSignalUpdate":
         updates.append((msg.topic, pl))
     elif n == "SouthboundReadResult":
         reads.append(pl)
@@ -44,13 +44,13 @@ def env(name, body, reply_to=None):
     return json.dumps({"header": h, "tags": {}, "body": body})
 
 
-def read_tag(c, read_topic):
+def read_signal(c, read_topic):
     reads.clear()
-    c.publish(read_topic, env("ReadTags", {"tags": [{"namespaceUri": NS, "tagId": TAG}]}, REPLY))
+    c.publish(read_topic, env("ReadSignals", {"signals": [{"namespaceUri": NS, "signalId": SIGNAL}]}, REPLY))
     time.sleep(2.5)
     for r in reads:
         for e in r.get("body", {}).get("reads", []):
-            if e.get("tag", {}).get("address", {}).get("nodeId") == TAG:
+            if e.get("signal", {}).get("address", {}).get("nodeId") == SIGNAL:
                 return e
     return None
 
@@ -62,7 +62,7 @@ def main():
     c.connect(BROKER_HOST, BROKER_PORT, 60)
     c.loop_start()
 
-    print("[*] waiting for a SouthboundTagUpdate to derive topics...", flush=True)
+    print("[*] waiting for a SouthboundSignalUpdate to derive topics...", flush=True)
     deadline = time.time() + 30
     while time.time() < deadline and not updates:
         time.sleep(0.5)
@@ -75,13 +75,13 @@ def main():
     write_topic = f"southbound/{comp}/{inst}/write"
     print(f"[*] read={read_topic} write={write_topic}", flush=True)
 
-    before = read_tag(c, read_topic)
+    before = read_signal(c, read_topic)
     if not before:
-        print(f"FAIL: {TAG} not found/readable (does it exist? read permission?)", flush=True)
+        print(f"FAIL: {SIGNAL} not found/readable (does it exist? read permission?)", flush=True)
         c.loop_stop()
         sys.exit(1)
     cur = before.get("value")
-    print(f"[1] {TAG} before = {cur!r} ({before.get('quality')})", flush=True)
+    print(f"[1] {SIGNAL} before = {cur!r} ({before.get('quality')})", flush=True)
 
     if isinstance(cur, bool):
         newv = not cur
@@ -89,14 +89,14 @@ def main():
         newv = (cur or 0) + 1
     else:
         newv = "ggcommons-" + datetime.now(timezone.utc).strftime("%H%M%S")
-    print(f"[2] writing {TAG} = {newv!r}", flush=True)
-    c.publish(write_topic, env("WriteTags", {"writes": [{"namespaceUri": NS, "tagId": TAG, "value": newv}]}))
+    print(f"[2] writing {SIGNAL} = {newv!r}", flush=True)
+    c.publish(write_topic, env("WriteSignals", {"writes": [{"namespaceUri": NS, "signalId": SIGNAL, "value": newv}]}))
     time.sleep(2)
 
-    after = read_tag(c, read_topic)
+    after = read_signal(c, read_topic)
     av = after.get("value") if after else None
     aq = after.get("quality") if after else None
-    print(f"[3] {TAG} after  = {av!r} ({aq})", flush=True)
+    print(f"[3] {SIGNAL} after  = {av!r} ({aq})", flush=True)
 
     if isinstance(newv, bool):
         ok = bool(av) == newv
@@ -108,7 +108,7 @@ def main():
     c.loop_stop()
     c.disconnect()
     print("\n===== KEP WRITE =====", flush=True)
-    print(f"  {'PASS' if ok else 'FAIL'}  write -> read-back {TAG}", flush=True)
+    print(f"  {'PASS' if ok else 'FAIL'}  write -> read-back {SIGNAL}", flush=True)
     print(f"===== {'PASS' if ok else 'FAIL'} =====", flush=True)
     sys.exit(0 if ok else 1)
 

@@ -4,7 +4,7 @@ import com.google.gson.JsonObject;
 
 import java.util.UUID;
 
-/** One OPC UA subscription: a publish interval plus include/exclude tag matchers. */
+/** One OPC UA subscription: a publish interval plus include/exclude signal matchers. */
 public class SubscriptionSpec {
 
     private double publishIntervalMs;
