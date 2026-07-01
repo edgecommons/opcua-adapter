@@ -42,13 +42,13 @@ def on_message(c, u, msg):
 
 
 def updates():
-    return [(t, p) for t, p in msgs if p.get("header", {}).get("name") == "SouthboundTagUpdate"]
+    return [(t, p) for t, p in msgs if p.get("header", {}).get("name") == "SouthboundSignalUpdate"]
 
 
 def request(c, topic, body, timeout=5):
     cid = str(uuid.uuid4())
     reply = f"southbound/reply/pt/{cid}"
-    h = {"name": "ReadTags", "version": "1.0", "timestamp": datetime.now(timezone.utc).isoformat(),
+    h = {"name": "ReadSignals", "version": "1.0", "timestamp": datetime.now(timezone.utc).isoformat(),
          "uuid": str(uuid.uuid4()), "correlation_id": cid, "reply_to": reply}
     c.publish(topic, json.dumps({"header": h, "tags": {}, "body": body}))
     deadline = time.time() + timeout
@@ -61,8 +61,8 @@ def request(c, topic, body, timeout=5):
 
 
 def read_all(c, read_topic):
-    rp = request(c, read_topic, {"tags": [{"namespaceUri": NS, "tagId": n} for n in NODES]})
-    return {e["tag"]["address"].get("nodeId"): e for e in (rp.get("body", {}).get("reads", []) if rp else [])}
+    rp = request(c, read_topic, {"signals": [{"namespaceUri": NS, "signalId": n} for n in NODES]})
+    return {e["signal"]["address"].get("nodeId"): e for e in (rp.get("body", {}).get("reads", []) if rp else [])}
 
 
 def main():
@@ -92,8 +92,8 @@ def main():
         check(f"read {n}", isinstance(v, str) and (e or {}).get("quality") == "GOOD", f"value={v!r}")
 
     # write each (a string); the adapter must reject (skip) unsupported types -> value unchanged
-    writes = [{"namespaceUri": NS, "tagId": n, "value": "OVERWRITE"} for n in NODES]
-    c.publish(write_topic, json.dumps({"header": {"name": "WriteTags", "correlation_id": str(uuid.uuid4())},
+    writes = [{"namespaceUri": NS, "signalId": n, "value": "OVERWRITE"} for n in NODES]
+    c.publish(write_topic, json.dumps({"header": {"name": "WriteSignals", "correlation_id": str(uuid.uuid4())},
                                        "tags": {}, "body": {"writes": writes}}))
     time.sleep(2)
     after = read_all(c, read_topic)

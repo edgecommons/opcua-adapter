@@ -20,8 +20,8 @@ import java.util.concurrent.CountDownLatch;
  * OPC UA → Greengrass southbound adapter, built on the ggcommons Java library.
  *
  * <p>Bridges one or more OPC UA servers (one per {@code component.instances[]} entry) onto the
- * GGCommons messaging bus using the southbound contract (docs/SOUTHBOUND.md): subscribes to tags
- * and republishes value changes as {@code SouthboundTagUpdate} messages, serves on-demand batch
+ * GGCommons messaging bus using the southbound contract (docs/SOUTHBOUND.md): subscribes to signals
+ * and republishes value changes as {@code SouthboundSignalUpdate} messages, serves on-demand batch
  * reads and batch writes, and emits the {@code southbound_health} metric.
  */
 public class OpcUaAdapter {

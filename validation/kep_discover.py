@@ -1,4 +1,4 @@
-"""Discover a live OPC UA server's endpoints, namespaces, and a sample of its tags.
+"""Discover a live OPC UA server's endpoints, namespaces, and a sample of its signals.
 
 Run this against KEPServerEX (or any server) to learn exactly how to configure the adapter
 instead of guessing. It does two things:
@@ -8,11 +8,11 @@ instead of guessing. It does two things:
      policy + message mode + accepted user-token types.
   2. If a None + Anonymous endpoint is reachable, opens a session and dumps the namespace
      array and a sample of variable nodes (NodeId + the stable namespace URI) so you can copy
-     real `namespaceUri` / `tagId` values straight into config.json.
+     real `namespaceUri` / `signalId` values straight into config.json.
 
 Usage:
     python validation/kep_discover.py opc.tcp://192.168.1.180:49320
-    python validation/kep_discover.py opc.tcp://192.168.1.180:49320 --browse-depth 3 --max-tags 40
+    python validation/kep_discover.py opc.tcp://192.168.1.180:49320 --browse-depth 3 --max-signals 40
 """
 import argparse
 import asyncio
@@ -37,8 +37,8 @@ async def list_endpoints(url):
     return True
 
 
-async def browse_sample(url, depth, max_tags):
-    print(f"\n=== Trying a None+Anonymous session on {url} (for namespace + tag discovery) ===")
+async def browse_sample(url, depth, max_signals):
+    print(f"\n=== Trying a None+Anonymous session on {url} (for namespace + signal discovery) ===")
     client = Client(url)
     try:
         async with client:
@@ -47,14 +47,14 @@ async def browse_sample(url, depth, max_tags):
             for i, uri in enumerate(ns_array):
                 print(f"      [{i}] {uri}")
 
-            print(f"\n  Sample variable nodes (depth {depth}, up to {max_tags}):")
+            print(f"\n  Sample variable nodes (depth {depth}, up to {max_signals}):")
             found = []
 
             async def walk(node, level):
-                if len(found) >= max_tags or level > depth:
+                if len(found) >= max_signals or level > depth:
                     return
                 for child in await node.get_children():
-                    if len(found) >= max_tags:
+                    if len(found) >= max_signals:
                         return
                     nclass = await child.read_node_class()
                     nid = child.nodeid
@@ -62,7 +62,7 @@ async def browse_sample(url, depth, max_tags):
                         uri = ns_array[nid.NamespaceIndex] if nid.NamespaceIndex < len(ns_array) else "?"
                         ident = nid.Identifier
                         found.append((nid.NamespaceIndex, uri, ident))
-                        print(f"      ns={nid.NamespaceIndex} uri={uri!r} tagId={ident!r}")
+                        print(f"      ns={nid.NamespaceIndex} uri={uri!r} signalId={ident!r}")
                     elif nclass == ua.NodeClass.Object:
                         await walk(child, level + 1)
 
@@ -78,12 +78,12 @@ async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("url", help="opc.tcp://host:port")
     ap.add_argument("--browse-depth", type=int, default=3)
-    ap.add_argument("--max-tags", type=int, default=40)
+    ap.add_argument("--max-signals", type=int, default=40)
     args = ap.parse_args()
 
     reachable = await list_endpoints(args.url)
     if reachable:
-        await browse_sample(args.url, args.browse_depth, args.max_tags)
+        await browse_sample(args.url, args.browse_depth, args.max_signals)
 
 
 if __name__ == "__main__":

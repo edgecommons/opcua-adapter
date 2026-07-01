@@ -18,7 +18,7 @@ import java.util.TimerTask;
 /**
  * One OPC UA device connection — the coordinator that wires the focused collaborators:
  * {@link OpcUaConnection} (connect), {@link AddressSpaceBrowser} (browse),
- * {@link SubscriptionManager} (subscribe), {@link TagUpdatePublisher} (northbound publish),
+ * {@link SubscriptionManager} (subscribe), {@link SignalUpdatePublisher} (northbound publish),
  * {@link CommandService} (read/write/control), {@link HealthMetrics} (health). One per
  * {@code component.instances[]} entry.
  */
@@ -44,13 +44,13 @@ public class OpcUaDevice {
         Map<NodeId, UaVariableNode> allNodes = new AddressSpaceBrowser(client, config.getId()).browseAll();
 
         // 3. Northbound publisher + subscriptions feeding it.
-        TagUpdatePublisher publisher = new TagUpdatePublisher(messaging, configManager, config, client.getNamespaceTable());
+        SignalUpdatePublisher publisher = new SignalUpdatePublisher(messaging, configManager, config, client.getNamespaceTable());
         SubscriptionManager subscriptions = new SubscriptionManager(client, config, allNodes, publisher, counters);
         subscriptions.createAll();
 
         // 4. Command surface (write / read / control).
         CommandService commands = new CommandService(client, messaging, configManager, config, counters,
-                connection::isConnected, subscriptions::getResolvedTags);
+                connection::isConnected, subscriptions::getResolvedSignals);
         commands.subscribe();
 
         // 5. Periodic flush of batched updates + health emission.

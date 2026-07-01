@@ -15,7 +15,7 @@
         "id": "sim1",
         "adapter": "opcua",
         "connection": { "endpoint": "opc.tcp://localhost:4840/", "securityPolicy": "None" },
-        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{tagId}", "batchMs": 0 },
+        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 0 },
         "write": { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
         "read": { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
         "subscriptions": [
@@ -32,7 +32,7 @@
           "securityPolicy": "None",
           "user": { "username": "<kep-ua-user>", "password": "<password>" }
         },
-        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{tagId}", "batchMs": 0 },
+        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 0 },
         "write": { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
         "read": { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
         "subscriptions": [

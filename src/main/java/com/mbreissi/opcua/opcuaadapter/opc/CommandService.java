@@ -39,18 +39,18 @@ public class CommandService {
     private final ServerConfiguration serverConfig;
     private final ClientMetrics counters;
     private final BooleanSupplier connected;
-    private final Supplier<Map<String, ResolvedTag>> resolvedTags;
+    private final Supplier<Map<String, ResolvedSignal>> resolvedSignals;
 
     public CommandService(OpcUaClient client, MessagingClient messaging, ConfigManager config,
                           ServerConfiguration serverConfig, ClientMetrics counters,
-                          BooleanSupplier connected, Supplier<Map<String, ResolvedTag>> resolvedTags) {
+                          BooleanSupplier connected, Supplier<Map<String, ResolvedSignal>> resolvedSignals) {
         this.client = client;
         this.messaging = messaging;
         this.config = config;
         this.serverConfig = serverConfig;
         this.counters = counters;
         this.connected = connected;
-        this.resolvedTags = resolvedTags;
+        this.resolvedSignals = resolvedSignals;
     }
 
     public void subscribe() {
@@ -62,7 +62,7 @@ public class CommandService {
         messaging.subscribe(serverConfig.getControlTopic(), this::handleControl);
     }
 
-    /** Batch write: body {@code {"writes":[{ns,tagId,value,status?,sourceTs?}, ...]}} (single object also accepted). */
+    /** Batch write: body {@code {"writes":[{ns,signalId,value,status?,sourceTs?}, ...]}} (single object also accepted). */
     private void handleWrite(Message message) {
         try {
             JsonObject payload = asJsonObject(message);
@@ -115,7 +115,7 @@ public class CommandService {
                     LOGGER.warn("[{}] write to {} returned {}", serverConfig.getId(), nodeIds.get(i), results.get(i));
                 }
             }
-            LOGGER.debug("[{}] batch write of {} tag(s) complete", serverConfig.getId(), nodeIds.size());
+            LOGGER.debug("[{}] batch write of {} signal(s) complete", serverConfig.getId(), nodeIds.size());
         } catch (Exception e) {
             LOGGER.error("[{}] write request failed: {}", serverConfig.getId(), e.toString());
         }
@@ -123,20 +123,20 @@ public class CommandService {
 
     /**
      * On-demand batch read (request/reply): request body
-     * {@code {"tags":[{namespaceUri|ns, tagId}, ...]}}; reply body
-     * {@code {"id":..., "reads":[{tag:{id,address}, value, quality, qualityRaw, sourceTs, serverTs}]}}.
-     * Tags that cannot be resolved are omitted from {@code reads}; match results by {@code tag}, not position.
+     * {@code {"signals":[{namespaceUri|ns, signalId}, ...]}}; reply body
+     * {@code {"id":..., "reads":[{signal:{id,address}, value, quality, qualityRaw, sourceTs, serverTs}]}}.
+     * Signals that cannot be resolved are omitted from {@code reads}; match results by {@code signal}, not position.
      */
     private void handleRead(Message request) {
         try {
             JsonObject payload = asJsonObject(request);
-            JsonArray tags = (payload != null && payload.has("tags")) ? payload.getAsJsonArray("tags") : new JsonArray();
+            JsonArray signals = (payload != null && payload.has("signals")) ? payload.getAsJsonArray("signals") : new JsonArray();
             List<NodeId> nodeIds = new ArrayList<>();
-            for (JsonElement el : tags) {
+            for (JsonElement el : signals) {
                 try {
                     nodeIds.add(nodeIdFrom(el.getAsJsonObject()));
                 } catch (Exception e) {
-                    LOGGER.warn("[{}] read tag skipped: {}", serverConfig.getId(), e.getMessage());
+                    LOGGER.warn("[{}] read signal skipped: {}", serverConfig.getId(), e.getMessage());
                 }
             }
             List<DataValue> values = nodeIds.isEmpty()
@@ -146,11 +146,11 @@ public class CommandService {
             JsonArray reads = new JsonArray();
             for (int i = 0; i < nodeIds.size(); i++) {
                 NodeId nodeId = nodeIds.get(i);
-                JsonObject tag = new JsonObject();
-                tag.addProperty("id", nodeId.toParseableString());
-                tag.add("address", ValueCodec.address(nodeId, client.getNamespaceTable()));
+                JsonObject signal = new JsonObject();
+                signal.addProperty("id", nodeId.toParseableString());
+                signal.add("address", ValueCodec.address(nodeId, client.getNamespaceTable()));
                 JsonObject read = ValueCodec.toSample(values.get(i));
-                read.add("tag", tag);
+                read.add("signal", signal);
                 reads.add(read);
                 counters.incrementReadMetrics();
             }
@@ -173,10 +173,10 @@ public class CommandService {
         } else if (topic.endsWith("subscriptions")) {
             JsonObject responsePayload = new JsonObject();
             responsePayload.addProperty("id", serverConfig.getId());
-            JsonArray tags = new JsonArray();
-            resolvedTags.get().forEach((tagId, rt) -> {
+            JsonArray signals = new JsonArray();
+            resolvedSignals.get().forEach((signalId, rt) -> {
                 JsonObject t = new JsonObject();
-                t.addProperty("tagId", tagId);
+                t.addProperty("signalId", signalId);
                 int idx = rt.nodeId().getNamespaceIndex().intValue();
                 t.addProperty("namespace", idx);
                 String uri = client.getNamespaceTable().get(idx);
@@ -184,9 +184,9 @@ public class CommandService {
                     t.addProperty("namespaceUri", uri);
                 }
                 t.addProperty("match", rt.spec().getMatch());
-                tags.add(t);
+                signals.add(t);
             });
-            responsePayload.add("tags", tags);
+            responsePayload.add("signals", signals);
             reply(request, "subscriptions", responsePayload);
         }
     }
@@ -203,12 +203,12 @@ public class CommandService {
     /**
      * Build a {@link NodeId} from a read/write request entry. The namespace is identified by
      * {@code namespaceUri} (preferred — resolved to the server's current index) or a literal
-     * {@code ns} index; {@code tagId} is the node identifier. Throws if the entry is incomplete or the
+     * {@code ns} index; {@code signalId} is the node identifier. Throws if the entry is incomplete or the
      * URI is not in the server's namespace table.
      */
     private NodeId nodeIdFrom(JsonObject o) {
-        if (!o.has("tagId")) {
-            throw new IllegalArgumentException("entry missing 'tagId': " + o);
+        if (!o.has("signalId")) {
+            throw new IllegalArgumentException("entry missing 'signalId': " + o);
         }
         int ns;
         if (o.has("namespaceUri")) {
@@ -223,7 +223,7 @@ public class CommandService {
         } else {
             throw new IllegalArgumentException("entry needs 'namespaceUri' or 'ns': " + o);
         }
-        return new NodeId(ns, o.get("tagId").getAsString());
+        return new NodeId(ns, o.get("signalId").getAsString());
     }
 
     private static JsonObject asJsonObject(Message message) {

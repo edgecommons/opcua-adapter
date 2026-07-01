@@ -1,6 +1,6 @@
 """Validate DateTime read + write round-trip through the adapter against the asyncua sim.
 
-KEPServerEX's Simulator cannot host a writable Date tag, so the DateTime *write* path is verified
+KEPServerEX's Simulator cannot host a writable Date signal, so the DateTime *write* path is verified
 here against the sim's writable DateTimeRW node (ns=urn:ggcommons:sim). Run:
 
     python validation/opcua_sim_server.py &
@@ -18,7 +18,7 @@ import paho.mqtt.client as mqtt
 
 BROKER_HOST, BROKER_PORT = "localhost", 1883
 NS = "urn:ggcommons:sim"
-TAG = "DateTimeRW"
+SIGNAL = "DateTimeRW"
 NEW = "2030-06-15T08:09:10+00:00"
 
 msgs = []
@@ -36,7 +36,7 @@ def on_message(c, u, msg):
 
 
 def updates():
-    return [(t, p) for t, p in msgs if p.get("header", {}).get("name") == "SouthboundTagUpdate"]
+    return [(t, p) for t, p in msgs if p.get("header", {}).get("name") == "SouthboundSignalUpdate"]
 
 
 def request(c, topic, name, body, timeout=5):
@@ -55,9 +55,9 @@ def request(c, topic, name, body, timeout=5):
 
 
 def read_dt(c, read_topic):
-    rp = request(c, read_topic, "ReadTags", {"tags": [{"namespaceUri": NS, "tagId": TAG}]})
+    rp = request(c, read_topic, "ReadSignals", {"signals": [{"namespaceUri": NS, "signalId": SIGNAL}]})
     for e in (rp.get("body", {}).get("reads", []) if rp else []):
-        if e.get("tag", {}).get("address", {}).get("nodeId") == TAG:
+        if e.get("signal", {}).get("address", {}).get("nodeId") == SIGNAL:
             return e.get("value"), e.get("quality")
     return None, None
 
@@ -90,8 +90,8 @@ def main():
     results["read_iso"] = isinstance(before, str) and "DateTime{" not in before and iso(before) is not None
     print(f"[1] DateTimeRW before = {before!r} ({q})", flush=True)
 
-    c.publish(write_topic, json.dumps({"header": {"name": "WriteTags", "correlation_id": str(uuid.uuid4())},
-                                       "tags": {}, "body": {"writes": [{"namespaceUri": NS, "tagId": TAG, "value": NEW}]}}))
+    c.publish(write_topic, json.dumps({"header": {"name": "WriteSignals", "correlation_id": str(uuid.uuid4())},
+                                       "tags": {}, "body": {"writes": [{"namespaceUri": NS, "signalId": SIGNAL, "value": NEW}]}}))
     time.sleep(1.5)
     after, q2 = read_dt(c, read_topic)
     print(f"[2] wrote {NEW!r} -> read {after!r} ({q2})", flush=True)
