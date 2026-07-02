@@ -124,22 +124,32 @@ Keep `queueSize ≥ ceil(publishIntervalMs / samplingRateMs)` or the server disc
 
 **Goal:** read or write arbitrary signals on demand from a bus client.
 
-**Write** (requires `write.enabled: true`) — publish to the write topic, no reply:
+**Write** (requires `write.enabled: true`) — publish to the write topic. Fire-and-forget by default;
+add `reply_to` (+ `correlation_id`) to get a per-signal `SouthboundWriteResult` acknowledgment:
 ```
-topic:   southbound/<ComponentName>/<InstanceId>/write
-payload: { "writes": [ { "namespaceUri": "urn:kepware:KEPServerEX", "signalId": "…Setpoint", "value": 42.5 } ] }
+publish   topic: southbound/<ComponentName>/<InstanceId>/write
+          payload: { "header": { "reply_to": "app/replies/write1", "correlation_id": "write1" },
+                     "body": { "writes": [ { "namespaceUri": "urn:kepware:KEPServerEX", "signalId": "…Setpoint", "value": 42.5 } ] } }
+subscribe topic: app/replies/write1   → a SouthboundWriteResult (status SUCCESS/FAILED per entry, in request order)
 ```
+Omit `header` (just publish the body) for the old fire-and-forget behavior.
 
-**Read** — request/reply; set `reply_to` and `correlation_id`, subscribe to your reply topic:
+**Read** — request/reply; set `reply_to` and `correlation_id`, subscribe to your reply topic. Select
+signals either by an explicit list, or by regex `include`/`exclude` matchers (the same shape used by
+`subscriptions[].include`/`exclude`) to read an ad-hoc set without naming every signal:
 ```
 publish   topic: southbound/<ComponentName>/<InstanceId>/read
           payload: { "header": { "reply_to": "app/replies/42", "correlation_id": "42" },
-                     "body": { "signals": [ { "namespaceUri": "urn:kepware:KEPServerEX", "signalId": "…Counter" } ] } }
+                     "body": { "signals": [ { "namespaceUri": "urn:kepware:KEPServerEX", "signalId": "…Counter" } ],
+                               "include": [ { "namespaceUri": "urn:kepware:KEPServerEX", "match": "^Channel1\\.Device1\\..*" } ],
+                               "exclude": [ { "namespaceUri": "urn:kepware:KEPServerEX", "match": "\\.Diagnostics\\." } ] } }
 subscribe topic: app/replies/42   → a SouthboundReadResult with correlation_id "42"
 ```
-Address each signal by `namespaceUri` (preferred, resolved at runtime) or a literal `ns` index, plus
-`signalId`. With a GGCommons client, use its `request()` API instead of setting the header fields by
-hand. Full payload schemas are in the [messaging reference](reference/messaging-interface.md).
+Address each explicit signal by `namespaceUri` (preferred, resolved at runtime) or a literal `ns`
+index, plus `signalId`; `include` (required to activate matcher-based selection) tests a node's
+identifier/browseName/displayName, `exclude` tests the identifier only. With a GGCommons client, use
+its `request()` API instead of setting the header fields by hand. Full payload schemas are in the
+[messaging reference](reference/messaging-interface.md).
 
 ---
 
@@ -187,5 +197,8 @@ from the Downward API — typically no args). See the scaffold's `Dockerfile` an
   `metricEmission.target` (log / messaging / CloudWatch / Prometheus).
 - **Status query:** request/reply on `…/control/status` → `{ connected, metrics }`.
 - **Subscriptions query:** request/reply on `…/control/subscriptions` → the resolved signal list.
+- **Nodes query:** request/reply on `…/control/nodes` → every variable node found browsing the
+  server's address space (id, namespace, name, data type) — useful for discovering what's available
+  to subscribe to, read, or write, independent of what's currently configured.
 - **Logs:** each subsystem logs under its own name with the `[<instanceId>]` prefix; raise detail with
   `logging.level`.

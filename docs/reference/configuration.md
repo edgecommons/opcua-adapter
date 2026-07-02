@@ -127,8 +127,14 @@ One of three sources (`source`):
 |-----|------|---------|-----------|
 | `topic` | string (template) | `southbound/{ComponentName}/{InstanceId}/read` | Request/reply topic for on-demand reads. |
 
+This section only configures the topic — the read *request body* accepts an explicit `signals[]` list
+and/or regex `include`/`exclude` matchers (the same [signal matcher](#signal-matcher-entries-of-include--exclude)
+shape as `subscriptions[]`), documented in the
+[messaging reference](messaging-interface.md#read-requestreply).
+
 > The control topic, `southbound/{ComponentName}/{InstanceId}/control/+`, is fixed and not
-> configurable.
+> configurable. It answers `status`, `subscriptions`, and `nodes` (address-space enumeration) queries
+> — see the [messaging reference](messaging-interface.md#control-plane).
 
 ### `instances[].subscriptions[]`
 
