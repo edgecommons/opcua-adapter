@@ -9,6 +9,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.milo.opcua.stack.core.NamespaceTable;
 import org.eclipse.milo.opcua.stack.core.NodeIds;
+import org.eclipse.milo.opcua.stack.core.types.builtin.ByteString;
 import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
 import org.eclipse.milo.opcua.stack.core.types.builtin.DateTime;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
@@ -23,6 +24,7 @@ import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned;
 import java.lang.reflect.Array;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
+import java.util.UUID;
 
 /**
  * Conversions between OPC UA values and the southbound JSON contract: a {@code DataValue} → a
@@ -107,6 +109,43 @@ public final class ValueCodec {
         }
         address.addProperty("nodeId", nodeId.getIdentifier().toString());
         return address;
+    }
+
+    /**
+     * The OPC UA identifier type of a node id: {@code "Numeric"} | {@code "String"} | {@code "Guid"} |
+     * {@code "Opaque"}. Emitted alongside the bare identifier by the discovery queries so a caller can
+     * round-trip a non-string node id back through {@link #nodeId(int, String, String)}.
+     */
+    public static String idTypeName(NodeId nodeId) {
+        Object id = nodeId.getIdentifier();
+        if (id instanceof UInteger) {
+            return "Numeric";
+        }
+        if (id instanceof UUID) {
+            return "Guid";
+        }
+        if (id instanceof ByteString) {
+            return "Opaque";
+        }
+        return "String";
+    }
+
+    /**
+     * Rebuild a {@link NodeId} from a namespace index + bare identifier + optional {@code idType}
+     * ({@code "Numeric"}/{@code "String"}/{@code "Guid"}; case-insensitive). A {@code null}/absent or
+     * unrecognized {@code idType} constructs a {@code String} identifier (the historical default), so a
+     * plain string-identifier request is unchanged. This is the inverse of {@link #idTypeName(NodeId)}
+     * over the identifier emitted by the {@code nodes}/{@code subscriptions} queries.
+     */
+    public static NodeId nodeId(int ns, String identifier, String idType) {
+        if ("Numeric".equalsIgnoreCase(idType)) {
+            return new NodeId(ns, Unsigned.uint(Long.parseLong(identifier)));
+        }
+        if ("Guid".equalsIgnoreCase(idType)) {
+            return new NodeId(ns, UUID.fromString(identifier));
+        }
+        // "String" (default) and "Opaque"/unknown: construct a String identifier.
+        return new NodeId(ns, identifier);
     }
 
     /**

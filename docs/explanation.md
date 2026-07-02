@@ -39,7 +39,7 @@ each with one responsibility, assembled by a thin coordinator (`OpcUaDevice`):
 | `AddressSpaceBrowser` | Walk the server's address space and collect its variable nodes. |
 | `SubscriptionManager` | Match nodes to your signal specs and maintain the OPC UA subscriptions. |
 | `SignalUpdatePublisher` | Turn value changes into `SouthboundSignalUpdate` messages, batching per signal. |
-| `CommandService` | Serve the command surface: writes, on-demand reads, status/subscription queries. |
+| `CommandService` | Serve the command surface: writes (with optional ack), on-demand reads (list and/or regex), and status/subscriptions/nodes queries. |
 | `ValueCodec` | Convert between OPC UA values and the JSON contract (types, quality, timestamps). |
 | `HealthMetrics` | Define and emit the `southbound_health` metric. |
 
@@ -57,7 +57,7 @@ flowchart LR
     SRV["OPC UA server(s)<br/>opc.tcp://"]
     DEV["OPC UA Adapter<br/>one instance per server"]
     DP["<b>Data plane</b><br/>signal updates · reads · writes"]
-    CP["<b>Control plane</b><br/>status · subscriptions · health"]
+    CP["<b>Control plane</b><br/>status · subscriptions · nodes · health"]
     SRV <-->|"browse · subscribe · read · write"| DEV
     DEV <--> DP
     DEV <--> CP
@@ -68,8 +68,9 @@ updates flowing out to the bus, plus on-demand reads and writes of signal values
 adapter exists.
 
 The **control plane** carries management. It is low-volume and about the *adapter itself* rather than
-the process: "are you connected?", "what are you subscribed to?", and the health metric the adapter
-emits. A monitoring system lives here; a process historian lives on the data plane.
+the process: "are you connected?", "what are you subscribed to?", "what's available on the server?",
+and the health metric the adapter emits. A monitoring system lives here; a process historian lives on
+the data plane.
 
 The split tells an integrator what to build. A consumer of telemetry subscribes to the data-plane
 update topics and ignores the rest. An operations dashboard issues control-plane queries and watches

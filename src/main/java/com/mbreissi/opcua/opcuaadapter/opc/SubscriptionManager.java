@@ -12,7 +12,6 @@ import org.eclipse.milo.opcua.sdk.client.subscriptions.OpcUaMonitoredItem;
 import org.eclipse.milo.opcua.sdk.client.subscriptions.OpcUaSubscription;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.eclipse.milo.opcua.stack.core.types.builtin.StatusCode;
-import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UShort;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.DataChangeTrigger;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.DeadbandType;
 import org.eclipse.milo.opcua.stack.core.types.structured.DataChangeFilter;
@@ -26,7 +25,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.uint;
-import static org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.ushort;
 
 /**
  * Creates and maintains the OPC UA subscriptions for one device: matches address-space nodes to the
@@ -152,45 +150,33 @@ public class SubscriptionManager {
     /**
      * Resolve each signal spec's namespace to an effective index: a {@code namespaceUri} is looked up in
      * the server's current namespace table; otherwise the literal {@code namespace} is used. An
-     * unresolved URI maps to {@code -1} (the matcher is skipped, with a warning).
+     * unresolved URI maps to {@code -1} (the matcher is skipped, with a warning). Delegates the actual
+     * resolution to {@link SignalMatching#resolveNamespace}, shared with the on-demand read path.
      */
     private Map<SignalSpec, Integer> resolveNamespaces(List<SignalSpec> specs) {
         Map<SignalSpec, Integer> result = new IdentityHashMap<>();
         for (SignalSpec spec : specs) {
-            int ns;
-            if (spec.getNamespaceUri() != null) {
-                UShort idx = client.getNamespaceTable().getIndex(spec.getNamespaceUri());
-                ns = idx != null ? idx.intValue() : -1;
-                if (ns < 0) {
-                    LOGGER.warn("[{}] namespaceUri '{}' is not in the server's namespace table; matcher skipped",
-                            config.getId(), spec.getNamespaceUri());
-                }
-            } else {
-                ns = spec.getNamespace();
+            int ns = SignalMatching.resolveNamespace(spec, client.getNamespaceTable());
+            if (spec.getNamespaceUri() != null && ns < 0) {
+                LOGGER.warn("[{}] namespaceUri '{}' is not in the server's namespace table; matcher skipped",
+                        config.getId(), spec.getNamespaceUri());
             }
             result.put(spec, ns);
         }
         return result;
     }
 
-    /** Match a node against signal specs by resolved namespace index + regex over nodeId / browseName / displayName. */
+    /**
+     * Match a node against signal specs by resolved namespace index + regex over nodeId / browseName /
+     * displayName. Delegates to {@link SignalMatching#firstMatch}, shared with the on-demand read path.
+     */
     private SignalSpec matchSignal(UaVariableNode node, List<SignalSpec> specs, Map<SignalSpec, Integer> nsBySpec, boolean matchNames) {
         String idStr = node.getNodeId().getIdentifier().toString();
         String browseName = node.getBrowseName() != null && node.getBrowseName().getName() != null
                 ? node.getBrowseName().getName() : "";
         String displayName = node.getDisplayName() != null && node.getDisplayName().getText() != null
                 ? node.getDisplayName().getText() : "";
-        for (SignalSpec spec : specs) {
-            int ns = nsBySpec.getOrDefault(spec, -1);
-            if (ns < 0 || !node.getNodeId().getNamespaceIndex().equals(ushort(ns))) {
-                continue;
-            }
-            String regex = spec.getMatch();
-            if (idStr.matches(regex)
-                    || (matchNames && (browseName.matches(regex) || displayName.matches(regex)))) {
-                return spec;
-            }
-        }
-        return null;
+        int nodeNs = node.getNodeId().getNamespaceIndex().intValue();
+        return SignalMatching.firstMatch(specs, nsBySpec, idStr, browseName, displayName, nodeNs, matchNames);
     }
 }

@@ -2,6 +2,8 @@ package com.mbreissi.opcua.opcuaadapter.opc.config;
 
 import com.google.gson.JsonObject;
 
+import java.util.regex.Pattern;
+
 /**
  * One signal matcher within a subscription's include/exclude list (southbound config convention):
  * {@code { "namespaceUri": "<uri>", "namespace": <int>, "match": "<regex>", "topic": "<optional>",
@@ -20,6 +22,7 @@ public class SignalSpec {
     private final double samplingRateMs;
     private final int queueSize;
     private final DeadbandSpec deadband;
+    private Pattern compiled;
 
     private SignalSpec(int namespace, String namespaceUri, String match, String topic,
                    double samplingRateMs, int queueSize, DeadbandSpec deadband) {
@@ -44,6 +47,21 @@ public class SignalSpec {
 
     public String getMatch() {
         return match;
+    }
+
+    /**
+     * The {@link #getMatch()} regex, compiled once and cached. Compilation is lazy (first use) so it
+     * stays on the same call path as before — a config-time regex still surfaces a bad pattern where it
+     * always did (subscription build), while the on-demand read path compiles each request's patterns
+     * exactly once instead of recompiling per address-space node.
+     */
+    public Pattern pattern() {
+        Pattern p = compiled;
+        if (p == null) {
+            p = Pattern.compile(match);
+            compiled = p;
+        }
+        return p;
     }
 
     /** Optional per-signal publish-topic override; {@code null} to use the instance's publish topic. */

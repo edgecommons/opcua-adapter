@@ -50,7 +50,7 @@ public class OpcUaDevice {
 
         // 4. Command surface (write / read / control).
         CommandService commands = new CommandService(client, messaging, configManager, config, counters,
-                connection::isConnected, subscriptions::getResolvedSignals);
+                connection::isConnected, subscriptions::getResolvedSignals, allNodes);
         commands.subscribe();
 
         // 5. Periodic flush of batched updates + health emission.

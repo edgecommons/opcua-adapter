@@ -22,6 +22,21 @@ java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
 python validation/validate.py                                  # ALL PASS expected
 ```
 
+## Command-surface parity smoke (`control/nodes`, read include/exclude, write ack)
+
+Verifies the 3 command-surface capabilities closed relative to the old bridge (see
+`../../old_readmes/OPC_UA_vs_new-opcua-adapter.md` §3): the `control/nodes` address-space query, an
+on-demand read selected by regex `include`/`exclude` (no explicit `signals[]`), and a
+`SouthboundWriteResult` acknowledgment when a write carries `reply_to`. Runs against the same
+plaintext sim setup as the smoke above:
+
+```bash
+python validation/opcua_sim_server.py &
+java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
+     validation/messaging-local.json -c FILE validation/config.json -t smoke-thing &
+python validation/validate_command_parity.py                  # ALL PASS expected
+```
+
 ## Secure smoke (Basic256Sha256 / SignAndEncrypt)
 
 ```bash

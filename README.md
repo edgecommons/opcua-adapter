@@ -27,10 +27,13 @@ Full operator/integrator docs are in **[`docs/`](docs/)**, organized by [Diátax
   matchers by `namespace` + regex over nodeId / browseName / displayName.
 - **Signal-update publishing** — each change → a `SouthboundSignalUpdate` message (normalized
   `GOOD|BAD|UNCERTAIN` quality + native `qualityRaw` + source/server timestamps), batched per signal.
-- **Batch write** (`writeValues`) and **on-demand batch read** (`readValuesAsync`) via request/reply.
+- **Batch write** (`writeValues`, with an optional per-signal `SouthboundWriteResult` acknowledgment
+  when the request carries `reply_to`) and **on-demand batch read** (`readValuesAsync`) via
+  request/reply — by explicit signal list and/or regex `include`/`exclude` matchers.
 - **Secure connections** — `Basic256Sha256` / `SignAndEncrypt` with the client cert/key from the
   ggcommons **credentials vault**, a file, or a **PKCS#11** token; explicit server trust.
-- **Control plane** — `status` / `subscriptions` queries and a `southbound_health` metric.
+- **Control plane** — `status` / `subscriptions` / `nodes` (address-space enumeration) queries and a
+  `southbound_health` metric.
 
 ## Architecture
 
