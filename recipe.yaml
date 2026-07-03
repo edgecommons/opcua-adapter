@@ -16,17 +16,21 @@ ComponentConfiguration:
         java_format: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%-5p] %C{1} (%L) [%t] : %m%n"
       heartbeat:
         intervalSecs: 5
-        targets:
-          - type: "messaging"
-            config:
-              destination: "ipc"
-              topic: "heartbeat/{ThingName}/{ComponentName}"
+        destination: "local"
         measures:
           cpu: true
           memory: true
           disk: false
           fds: true
           files: true
+      # UNS enterprise hierarchy (last level = the device = thing name). A deployment overrides
+      # `identity` with the site/shop/line values for the target device/group.
+      hierarchy:
+        levels: ["site", "shop", "line", "device"]
+      identity:
+        site: "site1"
+        shop: "shop1"
+        line: "line1"
       tags: {}
       metricEmission:
         target: "log"

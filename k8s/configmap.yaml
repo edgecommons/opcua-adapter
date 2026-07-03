@@ -16,6 +16,8 @@ data:
       },
       "logging": { "level": "INFO" },
       "metricEmission": { "target": "prometheus" },
+      "hierarchy": { "levels": ["site", "device"] },
+      "identity":  { "site": "plant1" },
       "component": {
         "global": { "defaults": { "publishIntervalMs": 1000, "samplingRateMs": 500, "queueSize": 100 } },
         "instances": [
@@ -23,7 +25,8 @@ data:
             "id": "device-1",
             "adapter": "opcua",
             "connection": { "endpoint": "opc.tcp://opcua.default.svc.cluster.local:4840/", "securityPolicy": "None" },
-            "publish": { "topic": "southbound/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 1000 },
+            "publish": { "batchMs": 1000 },
+            "writes":  { "allow": [] },
             "subscriptions": [
               { "id": "all", "include": [ { "namespace": 0, "match": ".*" } ] }
             ]

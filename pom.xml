@@ -15,6 +15,16 @@
     <maven.compiler.target>25</maven.compiler.target>
     <junitVersion>5.9.2</junitVersion>
     <mavenPluginVersion>3.5.1</mavenPluginVersion>
+    <!-- LOCAL DEV OVERRIDE SEAM (the Maven analog of the bridge's gitignored .cargo/config.toml
+         `[patch]`): Maven resolves a dependency by coordinate, so there is no "path dependency" —
+         the local-dev equivalent is `mvn install` on the SIBLING checkout (../ggcommons/libs/java)
+         into your local ~/.m2, then pointing this property at whatever version that installs as
+         (`mvn -Dggcommons.version=<sibling-version> package`). Maven's local-repo-first resolution
+         means GitHub Packages is never contacted for a version already in ~/.m2. The UNS rework
+         ships on the sibling's `feat/unified-namespace` branch which is (still) version 0.1.1 — the
+         SAME string as the old published artifact, so the local ~/.m2 install shadows the published
+         one for local builds. Bump this to the released pin once the UNS library publishes. -->
+    <ggcommons.version>0.1.1</ggcommons.version>
   </properties>
 
   <dependencies>
@@ -46,7 +56,7 @@
     <dependency>
       <groupId>com.mbreissi</groupId>
       <artifactId>ggcommons</artifactId>
-      <version>0.1.1</version>
+      <version>${ggcommons.version}</version>
     </dependency>
     <dependency>
       <groupId>com.google.code.gson</groupId>

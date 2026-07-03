@@ -13,9 +13,16 @@ task recipes see [how-to-guides.md](how-to-guides.md).
 > **How config reaches the adapter.** The adapter reads one JSON document from the `-c/--config`
 > source, which defaults by platform: `HOST` → `FILE`, `GREENGRASS` → `GG_CONFIG` (the deployment),
 > `KUBERNETES` → `CONFIGMAP` (a mounted directory, hot-reloaded). Adapter settings live under
-> `component`; the sibling sections (`tags`, `messaging`, `logging`, `heartbeat`, `metricEmission`,
-> `credentials`, `streaming`) are standard ggcommons sections validated against the canonical
-> [config schema](reference/configuration.md).
+> `component`; the sibling sections (`hierarchy`, `identity`, `tags`, `messaging`, `logging`,
+> `heartbeat`, `metricEmission`, `credentials`, `streaming`) are standard ggcommons sections validated
+> against the canonical [config schema](reference/configuration.md).
+
+> **UNS addressing (read once).** This adapter is on the ggcommons **Unified Namespace**. Signal
+> updates ride the UNS `data` class — `ecv1/{device}/{component}/{instance}/data/{signalPath}` — with
+> topics minted by the library, not templated in config. The site hierarchy is declared once at the
+> top level (`hierarchy` + `identity`) and carried in every message's `identity` element; the retired
+> `publish.topic` / `write.topic` / `read.topic` / `southbound/…` scheme and `tags.site`-as-topic-var
+> are gone. Reads/writes/queries are the `cmd/sb/*` verbs. Each config below uses these forms.
 
 This page is organized as:
 
@@ -77,43 +84,41 @@ Three idioms follow from this:
 > echoes the **resolved** `namespace` index and its `namespaceUri` for every subscribed signal — or by
 > reading the server's `NamespaceArray`. Always substitute your server's values.
 
-### Topic resolution: tokens, overrides, and a worked example
+### Addressing: the UNS `data` class
 
-Every `SouthboundSignalUpdate` is published to a topic built from a template. Resolution happens per signal:
-the standard template variables are substituted, then `{signalId}` is replaced with the node's
-**identifier** (the bare id, e.g. `Channel1.Device1.Flow` — not the full `ns=2;s=…` form).
-
-| Token | Resolves to | Source |
-|-------|-------------|--------|
-| `{ThingName}` | the `-t/--thing` value (or the platform identity) | CLI / platform |
-| `{ComponentName}` | the component **short** name → `OpcUaAdapter` | binary |
-| `{ComponentFullName}` | the fully-qualified name → `com.mbreissi.opcua.OpcUaAdapter` | binary |
-| `{InstanceId}` | the instance `id` (e.g. `kep1`) | `instances[].id` |
-| `{<key>}` | any key under top-level `tags` (e.g. `{site}`, `{shop}`, `{line}`) | `tags` |
-| `{signalId}` | the OPC UA node identifier (publish topics only, substituted per signal) | runtime |
-
-Topic templates resolve in this order of specificity:
+Every `SouthboundSignalUpdate` is published to a UNS `data` topic the **library mints** — you do not
+template it. The grammar is:
 
 ```
-signal matcher's "topic"  ▸  instance "publish.topic"  ▸  built-in default
-                                                       (southbound/{ComponentName}/{InstanceId}/{signalId})
+ecv1/{device}/{component}/{instance}/data/{signalPath}
 ```
 
-A per-matcher `topic` (set on an `include` entry) overrides the instance's `publish.topic` for the
-signals that matcher selects — the standard way to route a subset (alarms, events) to its own stream.
+| Segment | Resolves to | Source |
+|---------|-------------|--------|
+| `{device}` | the resolved thing name = the **last** `hierarchy.levels` entry | `-t/--thing` / platform |
+| `{component}` | the component short name → `OpcUaAdapter` | binary |
+| `{instance}` | the instance `id` (e.g. `kep1`) | `instances[].id` |
+| `{signalPath}` | the node's bare identifier **sanitized to one channel token** (`/ \ + #` and control chars → `_`) | runtime |
 
-**Worked example.** Given `-t edge-gw-01`, `tags.site = "plant1"`, instance `id = "kep1"`, and
-`publish.topic = "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}"`:
+The **site hierarchy is not in the topic** — it rides the top-level envelope `identity` element,
+declared once via `hierarchy` + `identity`:
 
-| Signal (node id) | Matcher that selects it | Resolved publish topic |
-|---------------|-------------------------|------------------------|
-| `ns=2;s=Channel1.Device1.Flow` | process include (no `topic`) | `southbound/plant1/OpcUaAdapter/kep1/Channel1.Device1.Flow` |
-| `ns=2;s=Channel1.Device1.HiHiAlarm` | alarm include with `topic: "alarms/{site}/{InstanceId}/{signalId}"` | `alarms/plant1/kep1/Channel1.Device1.HiHiAlarm` |
+```jsonc
+"hierarchy": { "levels": ["site", "shop", "line", "device"] },
+"identity":  { "site": "plant1", "shop": "assembly", "line": "5" }
+```
 
-> `{signalId}` is the **raw identifier** and is published as a single MQTT topic level even when it
-> contains dots (dots are not MQTT separators). Numeric or GUID identifiers appear verbatim
-> (`…/kep1/2258`). If your server uses identifiers containing `/`, `+`, or `#`, prefer a per-matcher
-> `topic` that does not embed `{signalId}`, or key consumers on `signal.id` in the payload instead.
+**Worked example.** Given `-t edge-gw-01`, the hierarchy/identity above, and instance `id = "kep1"`:
+
+| Signal (node id) | Published `data` topic | `identity.path` on the envelope |
+|------------------|------------------------|---------------------------------|
+| `ns=2;s=Channel1.Device1.Flow` | `ecv1/edge-gw-01/OpcUaAdapter/kep1/data/Channel1.Device1.Flow` | `plant1/assembly/5/edge-gw-01` |
+| `ns=2;s=Line/5/Alarm` | `ecv1/edge-gw-01/OpcUaAdapter/kep1/data/Line_5_Alarm` (`/` sanitized to `_`) | `plant1/assembly/5/edge-gw-01` |
+
+> The **stable** `signal.id` in the body (the full `ns=2;s=…` form) is what consumers key on; the
+> `{signalPath}` is only the routing address. A fleet consumer subscribes **one wildcard**,
+> `ecv1/+/+/+/data/#`. To route topics under a `site` root on a multi-site broker, set
+> `topic.includeRoot: true` (needs ≥ 2 hierarchy levels). Per-signal topic overrides are retired.
 
 ---
 
@@ -129,7 +134,8 @@ here) or as a separate file passed positionally as `--transport MQTT ./messaging
 ```jsonc
 // config.json
 {
-  "tags": { "site": "lab", "shop": "s1", "line": "l1" },
+  "hierarchy": { "levels": ["site", "shop", "line", "device"] },
+  "identity":  { "site": "lab", "shop": "s1", "line": "l1" },
 
   "messaging": {
     "local": { "type": "mqtt", "host": "localhost", "port": 1883, "clientId": "opcua-adapter" }
@@ -139,7 +145,7 @@ here) or as a separate file passed positionally as `--transport MQTT ./messaging
 
   "metricEmission": {
     "target": "messaging",
-    "targetConfig": { "topic": "metrics/{ThingName}/{ComponentName}" }
+    "targetConfig": { "destination": "local" }
   },
 
   "component": {
@@ -151,9 +157,8 @@ here) or as a separate file passed positionally as `--transport MQTT ./messaging
         "id": "sim1",
         "adapter": "opcua",
         "connection": { "endpoint": "opc.tcp://localhost:4840/", "securityPolicy": "None" },
-        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 1000 },
-        "write":   { "enabled": false },
-        "read":    { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
+        "publish": { "batchMs": 1000 },
+        "writes":  { "allow": [] },
         "subscriptions": [
           {
             "id": "all",
@@ -176,18 +181,16 @@ java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
 
 | Option | Effect on runtime behavior |
 |--------|----------------------------|
-| `tags` | Site/asset identity. Each key is attached to every published message and is usable as a topic template variable (`{site}` above). Keys must match `^[a-zA-Z0-9_-]+$` and values are strings. Pure metadata — changing it does not affect connectivity, only message tagging and topic resolution. |
+| `hierarchy` / `identity` | The UNS enterprise hierarchy (last level = the device = thing name) and the values for every other level. Stamped onto every message's top-level `identity` (`path` = `lab/s1/l1/<thing>`) and used for fleet-wide addressing. Level names must match `^[A-Za-z0-9_-]+$`. Changing them changes every consumer's `identity` view (not the data topic, which is device/component/instance-scoped). |
 | `messaging.local` | The **local** MQTT broker the adapter publishes to and listens on. `host`/`port` point at the broker; `clientId` is the MQTT client identity (keep it unique per process or the broker drops the older session). On HOST this is one half of the dual-MQTT transport; add an `iotCore` block (see §3/§5) to also connect to AWS IoT Core. Without a reachable broker the adapter cannot publish or accept commands. |
-| `metricEmission.target` | Where the `southbound_health` metric goes (`log` / `messaging` / `cloudwatch` / `cloudwatchcomponent` / `prometheus`). With `messaging`, health is published to `targetConfig.topic`; with `log` it only appears in logs. Observability only — it does not change OPC UA behavior. |
+| `metricEmission.target` | Where the `southbound_health` metric goes (`log` / `messaging` / `cloudwatch` / `cloudwatchcomponent` / `prometheus`). With `messaging`, health is auto-published on the UNS `metric` class (`ecv1/{device}/{component}/main/metric/southbound_health`) — the topic is minted, so set `targetConfig.destination` (`local`/`iotcore`), **not** a `targetConfig.topic` (the schema rejects it). With `log` it only appears in logs. Observability only. |
 | `component.global.defaults` | Fallback timing for every instance/signal that does not set its own. `publishIntervalMs` (server→adapter delivery cadence), `samplingRateMs` (how often the server samples the value; `0` = as fast as the server allows), `queueSize` (server-side per-signal buffer). See the precedence table at the end. |
-| `instances[].id` | Stable, unique instance id (**required**). Appears as `{InstanceId}` in topics and as `device.instance` in messages. Each instance is one OPC UA server with its own connection thread, so renaming it changes topic routing and message identity. |
+| `instances[].id` | Stable, unique instance id (**required**). Appears as the UNS `{instance}` topic segment and as `device.instance` in messages. Each instance is one OPC UA server with its own connection thread, so renaming it changes topic routing and message identity. |
 | `instances[].adapter` | The southbound **adapter type** that should service this instance. This is a single-protocol binary: it treats *every* listed instance as an OPC UA server (it does **not** filter on this field today), and the published `device.adapter` is always `"opcua"`. Set it to `"opcua"` for clarity and forward-compatibility with the shared southbound convention (where one config can describe instances for several adapter binaries, e.g. an OPC UA and a Modbus adapter). |
 | `connection.endpoint` | The OPC UA server URL (`opc.tcp://host:port/`). The adapter connects here on a dedicated thread and **retries on failure**, so a server that is slow to boot delays only this instance, not the component. Empty by default (you must set it). |
 | `connection.securityPolicy: "None"` | Unencrypted, **anonymous** channel — no certificates required. Fine for a trusted LAN/dev. For a secured server see §3. |
-| `publish.topic` | Topic template for `SouthboundSignalUpdate` messages; resolved per the [topic rules](#topic-resolution-tokens-overrides-and-a-worked-example) above. Default (if omitted): `southbound/{ComponentName}/{InstanceId}/{signalId}`. |
-| `publish.batchMs` | Client-side coalescing window. `1000` here means the adapter buffers a signal's samples and emits **one message per signal per second** (each may carry several `samples`), reducing message count. Set `0` to emit one message the instant each sample arrives (lowest latency, most messages). Defaults to the resolved instance `publishIntervalMs` when omitted. |
-| `write.enabled: false` | The adapter does **not** subscribe to the write topic, so writes are rejected. Set `true` (see §3/§4) to accept writes. Default `false`. |
-| `read.topic` | Request/reply topic for on-demand reads. Always available regardless of `write.enabled`. Default `southbound/{ComponentName}/{InstanceId}/read`. |
+| `publish.batchMs` | Client-side coalescing window. `1000` here means the adapter buffers a signal's samples and emits **one message per signal per second** (each may carry several `samples`), reducing message count. Set `0` to emit one message the instant each sample arrives (lowest latency, most messages). Defaults to the resolved instance `publishIntervalMs` when omitted. (The topic is UNS-minted — `ecv1/{device}/{component}/{instance}/data/{signalPath}`; there is no `publish.topic`.) |
+| `writes.allow` | The stable `signal.id`s the `sb/write` verb may write (or `"*"` = allow all). Here `[]` accepts **no** writes (secure-by-default, replacing the old `write.enabled: false`). Reads are always available via the `sb/read` verb; there is no separate read topic. |
 | `subscriptions[].include` | The signal matchers to subscribe to. With only `{ "match": "Sine.*" }` and no timing overrides, these signals inherit `global.defaults`. (`Sine.*` whole-string-matches identifiers/names like `Sine1`, `Sine2`.) |
 
 ---
@@ -207,13 +210,10 @@ ComponentConfig:
     level: "INFO"
   heartbeat:
     intervalSecs: 5
-    targets:
-      - type: "messaging"
-        config:
-          destination: "ipc"                       # heartbeats go out over IPC, not a TCP broker
-          topic: "heartbeat/{ThingName}/{ComponentName}"
+    destination: "local"                           # state keepalive over IPC on GREENGRASS
     measures: { cpu: true, memory: true, disk: false, fds: true, files: true }
-  tags: { site: "plant1", shop: "assembly", line: "5" }
+  hierarchy: { levels: ["site", "shop", "line", "device"] }
+  identity:  { site: "plant1", shop: "assembly", line: "5" }
   metricEmission:
     target: "log"
     targetConfig:
@@ -225,9 +225,8 @@ ComponentConfig:
       - id: "kep1"
         adapter: "opcua"
         connection: { endpoint: "opc.tcp://192.168.1.50:49320/", securityPolicy: "None" }
-        publish: { topic: "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", batchMs: 1000 }
-        write:   { enabled: true }
-        read:    { topic: "southbound/{ComponentName}/{InstanceId}/read" }
+        publish: { batchMs: 1000 }
+        writes:  { allow: [ "ns=2;s=Channel1.Device1.Setpoint" ] }
         subscriptions:
           - id: "process"
             include:
@@ -244,7 +243,7 @@ java -jar OpcUaAdapter-1.0.0.jar --platform GREENGRASS -t my-thing
 | Difference from HOST | Effect on runtime behavior |
 |----------------------|----------------------------|
 | No `messaging` section; transport is IPC | The adapter publishes/subscribes through the Nucleus's local IPC pub/sub (and the IoT Core mqttproxy) instead of a TCP MQTT broker. The recipe's `accessControl` grants the IPC and `mqttproxy` topics; the message envelope on the wire is identical to HOST. |
-| `heartbeat.targets[].config.destination: "ipc"` | Routes the periodic system heartbeat over the local IPC transport. On HOST you would omit this (it goes to the local MQTT broker). Use `"iotcore"` to push it to AWS IoT Core instead (see §5). |
+| `heartbeat.destination: "local"` | Routes the UNS `state` keepalive over the local/IPC transport (on GREENGRASS that is IPC). On HOST it goes to the local MQTT broker. Use `"iotcore"` to push it to AWS IoT Core instead (see §5). The legacy `heartbeat.targets[]` array is removed — heartbeat config is now `{enabled, intervalSecs, measures, destination}`. |
 | `metricEmission.target: "log"` with a `/greengrass/v2/logs/...` path | Health metrics are written to the Nucleus-managed component log directory rather than published — convenient because Greengrass already rotates and ships those logs. |
 | `connection` / `publish` / `subscriptions` | **Identical semantics to HOST.** The OPC UA side does not know or care about the platform; only the transport and config source change. You can lift an instance verbatim between HOST and GREENGRASS. |
 | Cloud override | A `aws greengrassv2 create-deployment` merge config patches these same keys per device/group, so per-site `endpoint`/`tags`/`subscriptions` differences are deployment data, not code. |
@@ -264,7 +263,8 @@ the **dual-MQTT** messaging block (local broker **and** AWS IoT Core) you would 
 ```jsonc
 // config.json
 {
-  "tags": { "site": "plant1", "shop": "assembly", "line": "5" },
+  "hierarchy": { "levels": ["site", "shop", "line", "device"] },
+  "identity":  { "site": "plant1", "shop": "assembly", "line": "5" },
 
   "messaging": {
     "local":   { "type": "mqtt", "host": "localhost", "port": 1883, "clientId": "opcua-adapter" },
@@ -295,9 +295,8 @@ the **dual-MQTT** messaging block (local broker **and** AWS IoT Core) you would 
           },
           "user": { "source": "vault", "secret": "opcua/kep1/login" }
         },
-        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 1000 },
-        "write":   { "enabled": true },
-        "read":    { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
+        "publish": { "batchMs": 1000 },
+        "writes":  { "allow": [ "ns=2;s=Channel1.Device1.Setpoint" ] },
         "subscriptions": [
           { "id": "process",
             "include": [ { "namespaceUri": "Kepware Server", "match": "^Channel1\\.Device1\\..*" } ] }
@@ -357,8 +356,9 @@ This config bridges a packaging line on a KEPServerEX with two channels (`Channe
   matchers that strip the per-device diagnostics, statistics, and `_System` housekeeping so they do
   not flood the data plane. Low latency, with a small absolute deadband to kill sensor jitter.
 - **`alarms`** — every alarm signal across all channels, captured at the server's fastest sampling so no
-  transition is missed, with a **per-signal topic override** routing them to a dedicated `alarms/…`
-  topic. No deadband (you never want to deadband a discrete alarm).
+  transition is missed. No deadband (you never want to deadband a discrete alarm). (These publish on the
+  same UNS `data` class as the rest — consumers select alarms by the `signal.id`/`address` in the body,
+  or you split them out with a separate `evt`-emitting consumer. Per-signal topic overrides are retired.)
 - **`diagnostics`** — the slow housekeeping you *do* want (server clock, comms counters) at a 10 s
   cadence so it costs almost nothing.
 
@@ -378,9 +378,8 @@ This config bridges a packaging line on a KEPServerEX with two channels (`Channe
         "user": { "source": "vault", "secret": "opcua/kep1/login" }
       },
       "defaults": { "publishIntervalMs": 1000, "samplingRateMs": 500, "queueSize": 100 },
-      "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 1000 },
-      "write":   { "enabled": true },
-      "read":    { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
+      "publish": { "batchMs": 1000 },
+      "writes":  { "allow": [ "ns=2;s=Channel1.Device1.Setpoint" ] },
       "subscriptions": [
         {
           "id": "process",
@@ -405,8 +404,7 @@ This config bridges a packaging line on a KEPServerEX with two channels (`Channe
           "publishIntervalMs": 250,
           "include": [
             { "namespaceUri": "Kepware Server", "match": ".*\\.Alarms\\..*",
-              "samplingRateMs": 0, "queueSize": 100,
-              "topic": "alarms/{site}/{InstanceId}/{signalId}" }
+              "samplingRateMs": 0, "queueSize": 100 }
           ]
         },
         {
@@ -429,10 +427,10 @@ What this achieves, signal by signal:
 
 | Signal | Group / matcher | Outcome |
 |-----|-----------------|---------|
-| `Channel1.Device1.Flow` | `process` ▸ `^Channel1\..*` | sampled every 100 ms, ±0.5-unit deadband, delivered every 200 ms, batched to `southbound/{site}/…/kep1/Channel1.Device1.Flow` |
+| `Channel1.Device1.Flow` | `process` ▸ `^Channel1\..*` | sampled every 100 ms, ±0.5-unit deadband, delivered every 200 ms, batched to `ecv1/{device}/OpcUaAdapter/kep1/data/Channel1.Device1.Flow` |
 | `Channel2.Meter1.kWh` | `process` ▸ `^Channel2\..*` | sampled every 1 s, 1 %-of-range deadband (slow meter), delivered every 200 ms |
 | `Channel1.Device1.Diagnostics.Successful Reads` | `exclude` ▸ `.*\.Diagnostics\..*` | **dropped** — matched by `process` include but pruned by exclude |
-| `Channel1.Device1.Alarms.HiHi` | `alarms` ▸ `.*\.Alarms\..*` | captured at server-fastest sampling, routed to `alarms/{site}/kep1/Channel1.Device1.Alarms.HiHi` |
+| `Channel1.Device1.Alarms.HiHi` | `alarms` ▸ `.*\.Alarms\..*` | captured at server-fastest sampling, published to `ecv1/{device}/OpcUaAdapter/kep1/data/Channel1.Device1.Alarms.HiHi` |
 | `_System._Time_Second` | `diagnostics` ▸ `^_System\..*` | delivered every 10 s, tiny queue — near-zero cost |
 
 > **Why the `process` group also excludes `.*\.Alarms\..*`:** a node can match more than one
@@ -450,7 +448,7 @@ What this achieves, signal by signal:
 | `namespaceUri` | per matcher | Pins the OPC UA namespace by its **URI** (preferred). Resolved to the server's current index at connect time and re-resolved on rebuild, so a server that renumbers after a restart is followed automatically. An unresolved URI skips the matcher (with a warning). |
 | `namespace` | per matcher | Literal namespace **index**, used only when `namespaceUri` is absent (default `0`). Indexes are volatile across servers/restarts — use only for servers you know to be stable. |
 | `match` | per matcher | Java regex, **whole-string** match (see the [match rule](#include-vs-exclude-which-nodes-get-subscribed)). On `include` it tests identifier/browse name/display name; on `exclude` the identifier only. Defaults to `.*` (whole namespace) when omitted. |
-| `topic` | per `include` matcher | Per-signal publish-topic **override** (e.g. routing alarms to `alarms/…`). Falls back to the instance `publish.topic`. Has no effect on `exclude`. |
+| `topic` | per `include` matcher | **Retired** (ignored). Per-signal topic overrides are gone — all signals publish on the UNS `data` class. Split streams downstream by `signal.id`/`address`, or with an `evt`-emitting consumer. |
 | `samplingRateMs` | per matcher | How often the **server samples** the underlying value. `0` = as fast as the server allows; a larger value throttles a noisy source. A signal changing faster than this is only observed at sample boundaries — sampling sets the **resolution**. Inherits the instance/global default when omitted. |
 | `queueSize` | per matcher | Server-side buffer holding samples taken between two publishes. On overflow the **oldest samples are discarded**. Keep `queueSize ≥ ceil(publishIntervalMs / samplingRateMs)` or you silently drop data — here the `process` group is `200/100 = 2`, so `50` is generous. Inherits the instance/global default when omitted. |
 | `deadband` | per matcher | A **server-side** filter applied *before* the queue: the server ignores changes smaller than the threshold, so jitter never enters the pipeline. `type: "Absolute"` suppresses changes below `value` engineering units; `type: "Percent"` expresses `value` as a fraction of the signal's range (requires the server to advertise that range); `type: "None"` (default) disables it. Types are case-sensitive. Never deadband discrete/alarm signals. |
@@ -522,14 +520,15 @@ metric target set to `destination: "iotcore"`:
   },
 
   // Heartbeat and health go to IoT Core (low rate); signal data stays on the local bus.
+  // The state/metric topics are UNS-minted — only the destination is configurable, not the topic.
   "heartbeat": {
     "intervalSecs": 30,
-    "targets": [ { "type": "messaging", "config": { "destination": "iotcore", "topic": "heartbeat/{ThingName}/{ComponentName}" } } ],
+    "destination": "iotcore",
     "measures": { "cpu": true, "memory": true }
   },
   "metricEmission": {
     "target": "messaging",
-    "targetConfig": { "topic": "southbound/{ThingName}/{ComponentName}/health", "destination": "iotcore" }
+    "targetConfig": { "destination": "iotcore" }
   }
 }
 ```
@@ -575,7 +574,8 @@ data:
       },
       "logging": { "level": "INFO" },
       "metricEmission": { "target": "prometheus" },
-      "tags": { "site": "plant1" },
+      "hierarchy": { "levels": ["site", "device"] },
+      "identity":  { "site": "plant1" },
       "component": {
         "global": { "defaults": { "publishIntervalMs": 1000, "samplingRateMs": 500, "queueSize": 100 } },
         "instances": [
@@ -583,8 +583,8 @@ data:
             "id": "kep1",
             "adapter": "opcua",
             "connection": { "endpoint": "opc.tcp://opcua.default.svc.cluster.local:4840/", "securityPolicy": "None" },
-            "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 1000 },
-            "write":   { "enabled": true },
+            "publish": { "batchMs": 1000 },
+            "writes":  { "allow": [ "ns=2;s=Channel1.Device1.Setpoint" ] },
             "subscriptions": [
               { "id": "process",
                 "include": [ { "namespaceUri": "Kepware Server", "match": "^Channel1\\.Device1\\..*" } ] }
@@ -623,7 +623,7 @@ listing several `instances` — they share only the process. Mix security and ti
       "id": "sim1",
       "adapter": "opcua",
       "connection": { "endpoint": "opc.tcp://10.0.0.11:4840/", "securityPolicy": "None" },
-      "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 0 },
+      "publish": { "batchMs": 0 },
       "subscriptions": [
         { "id": "sines",
           "include": [ { "namespaceUri": "urn:ggcommons:sim", "match": "Sine.*" } ] }
@@ -638,7 +638,8 @@ listing several `instances` — they share only the process. Mix security and ti
         "clientCertificate": { "source": "vault", "secret": "opcua/kep1/appcert" },
         "user": { "source": "vault", "secret": "opcua/kep1/login" }
       },
-      "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 1000 },
+      "publish": { "batchMs": 1000 },
+      "writes":  { "allow": [ "ns=2;s=Plant.Line5.Setpoint" ] },
       "subscriptions": [
         { "id": "live",
           "include": [ { "namespaceUri": "Kepware Server", "match": "^Plant\\.Line5\\..*" } ] }
@@ -669,8 +670,8 @@ signal-matcher value  ▸  instances[].defaults  ▸  component.global.defaults 
 Built-in defaults: `publishIntervalMs = 1000`, `samplingRateMs = 0` (server's fastest),
 `queueSize = 100`. `publishIntervalMs` is a **subscription** setting (a matcher cannot set it);
 `samplingRateMs` and `queueSize` are **signal-matcher** settings (and also accepted on `defaults` as the
-fallback). `batchMs` defaults to the resolved instance `publishIntervalMs` when omitted; topic
-templates resolve signal `topic` ▸ instance `publish.topic` ▸ built-in default.
+fallback). `batchMs` defaults to the resolved instance `publishIntervalMs` when omitted. The publish
+**topic** is not configured — it is UNS-minted (`ecv1/{device}/{component}/{instance}/data/{signalPath}`).
 
 For the full option matrix, defaults, and template variables, see
 [reference/configuration.md](reference/configuration.md). For the topic/message payloads see

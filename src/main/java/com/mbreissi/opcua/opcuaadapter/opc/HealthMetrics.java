@@ -23,6 +23,7 @@ public class HealthMetrics {
                 .withConfig(config)
                 .addMeasure("connectionState", "Count", 1)
                 .addMeasure("readErrors", "Count", 60)
+                .addMeasure("writeErrors", "Count", 60)
                 .addDimension("instance", instanceId)
                 .build();
         metrics.defineMetric(health);
@@ -32,6 +33,7 @@ public class HealthMetrics {
         Map<String, Float> m = new HashMap<>();
         m.put("connectionState", connected ? 1.0f : 0.0f);
         m.put("readErrors", (float) counters.getIntervalReadErrors());
+        m.put("writeErrors", (float) counters.getIntervalWriteErrors());
         metrics.emitMetric(NAME, m);
     }
 }

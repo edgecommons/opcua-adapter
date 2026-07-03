@@ -71,7 +71,7 @@ In a third terminal, subscribe to the adapter's output. A short Python client ke
 python - <<'PY'
 import paho.mqtt.client as mqtt, json
 c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-c.on_connect = lambda c,u,f,rc,p=None: c.subscribe("southbound/#")
+c.on_connect = lambda c,u,f,rc,p=None: c.subscribe("ecv1/+/+/+/data/#")
 def on_msg(c,u,m):
     b = json.loads(m.payload)["body"]
     s = b["samples"][0]
@@ -85,12 +85,14 @@ Within a second you will see a steady stream of updates, e.g.:
 ns=2;s=Sine1                                  =     0.7071  [GOOD]
 ns=2;s=Sine2                                  =     0.7071  [GOOD]
 ```
-That is the **data plane**: each change the adapter sees becomes a `SouthboundSignalUpdate`. Leave this
-running to observe the next steps. (Stop it with Ctrl-C when done.)
+That is the **data plane**: each change becomes a `SouthboundSignalUpdate` on the UNS `data` class
+(`ecv1/tutorial-thing/OpcUaAdapter/sim1/data/{signalPath}`). Leave this running to observe the next
+steps. (Stop it with Ctrl-C when done.)
 
 ## Step 6 — Read a signal on demand
 
-Reads are request/reply. Send a request with a reply topic and read `Counter` and `Setpoint`:
+Reads are the `sb/read` command verb (request/reply). Send a request naming the target `instance` and
+read `Counter` and `Setpoint`:
 
 ```bash
 python - <<'PY'
@@ -100,28 +102,32 @@ got = []
 c.on_connect = lambda c,u,f,rc,p=None: c.subscribe("app/reply/1")
 c.on_message = lambda c,u,m: got.append(json.loads(m.payload))
 c.connect("localhost", 1883); c.loop_start()
-req = {"header": {"reply_to": "app/reply/1", "correlation_id": "1"},
-       "body": {"signals": [{"ns": 2, "signalId": "Counter"}, {"ns": 2, "signalId": "Setpoint"}]}}
-c.publish("southbound/OpcUaAdapter/sim1/read", json.dumps(req)); time.sleep(2)
+req = {"header": {"name": "sb/read", "version": "1.0", "reply_to": "app/reply/1", "correlation_id": "1"},
+       "body": {"instance": "sim1", "signals": [{"ns": 2, "signalId": "Counter"}, {"ns": 2, "signalId": "Setpoint"}]}}
+c.publish("ecv1/tutorial-thing/OpcUaAdapter/main/cmd/sb/read", json.dumps(req)); time.sleep(2)
 print(json.dumps(got[0]["body"], indent=2))
 PY
 ```
-You will get a `SouthboundReadResult` listing the two signals with their current values.
+The reply is `{ "ok": true, "result": { "id": "sim1", "reads": [ … ] } }` listing the two signals with
+their current values.
 
 ## Step 7 — Write a signal
 
-Set `Setpoint` to `42.5` (the bundled config enables writes):
+Set `Setpoint` to `42.5` with the `sb/write` verb. The bundled config allow-lists this signal
+(`writes.allow: ["ns=2;s=Setpoint"]`), so the write is accepted:
 
 ```bash
 python - <<'PY'
 import paho.mqtt.client as mqtt, json
 c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2); c.connect("localhost", 1883)
-c.publish("southbound/OpcUaAdapter/sim1/write",
-          json.dumps({"writes": [{"ns": 2, "signalId": "Setpoint", "value": 42.5}]})); c.loop()
+req = {"header": {"name": "sb/write", "version": "1.0"},
+       "body": {"instance": "sim1", "writes": [{"ns": 2, "signalId": "Setpoint", "value": 42.5}]}}
+c.publish("ecv1/tutorial-thing/OpcUaAdapter/main/cmd/sb/write", json.dumps(req)); c.loop()
 PY
 ```
 Re-run Step 6 and you will see `Setpoint` is now `42.5` — the value travelled bus → adapter → OPC UA
-server.
+server. (Add a `reply_to`/`correlation_id` to the header, as in Step 6, to get the per-entry write
+acknowledgment.)
 
 ## Step 8 — Clean up
 

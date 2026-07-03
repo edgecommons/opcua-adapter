@@ -10,6 +10,7 @@ public class ClientMetrics {
     private long totalWriteCount = 0L;
     private long intervalWriteCount = 0L;
     private long readErrors = 0L;
+    private long writeErrors = 0L;
 
     public synchronized void resetIntervals() {
         intervalReadCount = 0L;
@@ -30,9 +31,20 @@ public class ClientMetrics {
         readErrors++;
     }
 
+    public synchronized void incrementWriteErrors() {
+        writeErrors++;
+    }
+
     public synchronized long getIntervalReadErrors() {
         long e = readErrors;
         readErrors = 0L;
+        return e;
+    }
+
+    /** Returns and resets the write-error count accumulated since the last call (interval measure). */
+    public synchronized long getIntervalWriteErrors() {
+        long e = writeErrors;
+        writeErrors = 0L;
         return e;
     }
 

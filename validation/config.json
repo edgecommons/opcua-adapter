@@ -1,9 +1,11 @@
 {
-  "tags": { "appId": "smoke", "site": "lab", "shop": "s1", "line": "l1" },
+  "hierarchy": { "levels": ["site", "shop", "line", "device"] },
+  "identity":  { "site": "lab", "shop": "s1", "line": "l1" },
+  "tags": { "appId": "smoke" },
   "logging": { "level": "INFO" },
   "metricEmission": {
     "target": "messaging",
-    "targetConfig": { "topic": "metrics/{ThingName}/{ComponentName}" }
+    "targetConfig": { "destination": "local" }
   },
   "component": {
     "global": {
@@ -15,9 +17,8 @@
         "id": "sim1",
         "adapter": "opcua",
         "connection": { "endpoint": "opc.tcp://localhost:4840/", "securityPolicy": "None" },
-        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 500 },
-        "write": { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
-        "read": { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
+        "publish": { "batchMs": 500 },
+        "writes": { "allow": [ "ns=2;s=Setpoint" ] },
         "subscriptions": [
           {
             "id": "sines",

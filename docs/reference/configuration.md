@@ -14,20 +14,34 @@ The adapter reads one JSON document from the `-c/--config` source, which default
 | `GREENGRASS` | `GG_CONFIG` | the deployment `ComponentConfiguration` |
 | `KUBERNETES` | `CONFIGMAP` | a mounted ConfigMap directory (re-read on change) |
 
-Adapter settings live under `component`; the sibling sections (`tags`, `messaging`, `credentials`,
-`logging`, `heartbeat`, `metricEmission`) are standard ggcommons sections. Configuration hot-reloads
-where the source supports it.
+Adapter settings live under `component`; the sibling sections (`hierarchy`, `identity`, `tags`,
+`messaging`, `credentials`, `logging`, `heartbeat`, `metricEmission`) are standard ggcommons sections.
+Configuration hot-reloads where the source supports it.
 
 ## Top-level sections
 
 | Section | Required | Purpose |
 |---------|----------|---------|
 | `component` | yes | Adapter instances and their global defaults (this document). |
-| `tags` | recommended | Site/asset identity; attached to every published message and usable as topic template variables. |
+| `hierarchy` | recommended | UNS enterprise hierarchy: an ordered list of level names whose **last** level is the physical node (the device = resolved thing name). Absent ⇒ the default `["device"]`. |
+| `identity` | with `hierarchy` | Values for every hierarchy level **except the last**. Keys must match `hierarchy.levels[0..n-2]`. Stamped onto every message's top-level `identity`. |
+| `tags` | optional | Arbitrary business metadata attached to every message (no location keys — those moved to `identity`). Still usable as `{key}` template variables in **filesystem-path** templates (e.g. PKI dir). |
 | `messaging` | HOST/KUBERNETES | MQTT broker connection (or supply via `--transport MQTT <file>`). On GREENGRASS the transport is IPC. |
-| `credentials` | only for `vault` cert source | Enables the encrypted vault used by `clientCertificate.source: "vault"` (see [security how-to](../how-to-guides.md#connect-to-a-secured-server)). |
-| `metricEmission` | optional | Routes the `southbound_health` metric (`target`: `log`/`messaging`/`cloudwatch`/`prometheus`). |
+| `topic.includeRoot` | optional | `true` inserts the first hierarchy value (`site`) after the `ecv1` root in built topics (multi-site broker). Default `false` (rootless). |
+| `credentials` | only for `vault` cert source | Enables the encrypted vault used by `clientCertificate.source: "vault"`. |
+| `metricEmission` | optional | Routes the `southbound_health` metric (`target`: `log`/`messaging`/`cloudwatch`/`prometheus`). The `metric` topic is UNS-minted — do **not** set a `targetConfig.topic` (the schema rejects it); use `targetConfig.destination` (`local`/`iotcore`) instead. |
 | `logging`, `heartbeat` | optional | Standard ggcommons sections. |
+
+### `hierarchy` / `identity` (UNS)
+
+```jsonc
+"hierarchy": { "levels": ["site", "shop", "line", "device"] },   // last = the device (thing name)
+"identity":  { "site": "site1", "shop": "shop1", "line": "line1" } // values for all but the last level
+```
+
+The device level's value is the resolved thing name (`-t/--thing`, `AWS_IOT_THING_NAME`, or the K8s
+Downward API). Level names are strict (`^[A-Za-z0-9_-]+$`, unique). A key in `identity` equal to the
+last level name — or not a declared level — is a startup error.
 
 ## `component.global`
 
@@ -43,13 +57,12 @@ These are overridden by an instance's own `defaults`.
 
 | Key | Type | Default | Definition |
 |-----|------|---------|-----------|
-| `id` | string | array identity | Stable, unique instance id. Appears as `{InstanceId}` in topics and as `device.instance` in messages. |
+| `id` | string | array identity | Stable, unique instance id. Appears as the UNS `{instance}` topic segment and as `device.instance` in messages. |
 | `adapter` | string | `"opcua"` | Informational; echoed as `device.adapter`. |
 | `connection` | object | — | OPC UA endpoint and security (below). |
 | `defaults` | object | inherits `global.defaults` | Per-instance timing overrides (`publishIntervalMs`, `samplingRateMs`, `queueSize`). |
 | `publish` | object | — | Signal-update publishing (below). |
-| `write` | object | — | Write command topic (below). |
-| `read` | object | — | On-demand read request topic (below). |
+| `writes` | object | — | Write allow-list (below). |
 | `subscriptions` | array | `[]` | Subscriptions and signal matchers (below). |
 
 ### `instances[].connection`
@@ -70,8 +83,7 @@ For `securityPolicy: "None"` only `endpoint` is required (plus `user`, if the se
 
 Optional. Supplies a **UserName identity token**; without it the adapter connects **anonymously**.
 It is independent of channel security — a `None` (unencrypted) endpoint can still require a user
-token, as KEPServerEX does by default. On a `None` channel the password is encrypted with the
-server's endpoint certificate when the server's user-token policy requires it.
+token, as KEPServerEX does by default.
 
 | Form | Keys | Definition |
 |------|------|-----------|
@@ -86,9 +98,8 @@ server's endpoint certificate when the server's user-token policy requires it.
 }
 ```
 
-The server validates the user against its own account store (e.g. KEPServerEX's **User Manager**) and
-applies that user's authorization. An under-privileged account may see only part of the address space,
-so an over-restricted user can yield empty subscriptions even though the connection succeeds.
+The server validates the user against its own account store and applies that user's authorization. An
+under-privileged account can yield empty subscriptions even though the connection succeeds.
 
 #### `connection.clientCertificate`
 
@@ -98,49 +109,45 @@ One of three sources (`source`):
 |----------|------|-----------|
 | `vault` | `secret` | Reads a `TlsBundle` (`{certPem, keyPem, caPem}`) from the credentials vault; requires a `credentials` section. |
 | `file` | `certPath`, `keyPath` | PEM certificate and private key files (templated paths). |
-| `pkcs11` | `modulePath`, `slotIndex`, `pin` or `pinEnv`, `keyLabel`, `certLabel` | Key + certificate on a PKCS#11 token. (Net-new; validate against your token.) |
+| `pkcs11` | `modulePath`, `slotIndex`, `pin` or `pinEnv`, `keyLabel`, `certLabel` | Key + certificate on a PKCS#11 token. |
 
 #### `connection.trust`
 
 | Key | Type | Default | Definition |
 |-----|------|---------|-----------|
-| `pkiDir` | string (template) | `pki/{InstanceId}` | Trust-list directory; `trusted/`, `rejected/`, `issuers/` are created here. |
+| `pkiDir` | string (template) | `pki/{InstanceId}` | Trust-list directory; `trusted/`, `rejected/`, `issuers/` are created here. Path templates (`{ThingName}`, `{InstanceId}`, `{tags.*}`) are resolved. |
 | `serverCertificate` | object | — | Optionally pin the server cert: `{source:"file", path}`, or `{source:"vault", secret, field:"caPem"}`. |
 
 ### `instances[].publish`
 
 | Key | Type | Default | Definition |
 |-----|------|---------|-----------|
-| `topic` | string (template) | `southbound/{ComponentName}/{InstanceId}/{signalId}` | Topic for `SouthboundSignalUpdate` messages. A signal matcher's `topic` overrides this per signal. |
 | `batchMs` | number | the instance `publishIntervalMs` | If `> 0`, buffer a signal's samples and publish one message per `batchMs`. If `0`, publish each sample immediately. |
 
-### `instances[].write`
+> **Addressing is UNS-minted.** There is no `publish.topic` — signal updates ride the UNS `data` class
+> (`ecv1/{device}/{component}/{instance}/data/{signalPath}`), where `{signalPath}` is the node's bare
+> identifier sanitized to one channel token. The legacy `publish.topic` template (and per-signal
+> `topic` overrides) are retired.
+
+### `instances[].writes` (D‑U16 allow-list)
 
 | Key | Type | Default | Definition |
 |-----|------|---------|-----------|
-| `enabled` | boolean | `false` | If `false`, the adapter does not subscribe to the write topic (writes are not accepted). |
-| `topic` | string (template) | `southbound/{ComponentName}/{InstanceId}/write` | Topic the adapter listens on for batch writes. |
+| `allow` | string[] | `[]` | Stable `signal.id`s the `sb/write` verb may write (or the wildcard `"*"` = allow all). **Absent/empty ⇒ every write is rejected** (secure-by-default; replaces the boolean `write.enabled: false`). |
 
-### `instances[].read`
+Matching is **exact** against the target's stable `signal.id` (the `ns=<ns>;<type>=<id>` parseable
+form, as published in `SouthboundSignalUpdate.signal.id`), e.g. `"ns=2;s=Channel1.Device1.Setpoint"`.
+A non-allow-listed write is confirmed `FAILED` and raises `evt/warning/write-rejected`.
 
-| Key | Type | Default | Definition |
-|-----|------|---------|-----------|
-| `topic` | string (template) | `southbound/{ComponentName}/{InstanceId}/read` | Request/reply topic for on-demand reads. |
-
-This section only configures the topic — the read *request body* accepts an explicit `signals[]` list
-and/or regex `include`/`exclude` matchers (the same [signal matcher](#signal-matcher-entries-of-include--exclude)
-shape as `subscriptions[]`), documented in the
-[messaging reference](messaging-interface.md#read-requestreply).
-
-> The control topic, `southbound/{ComponentName}/{InstanceId}/control/+`, is fixed and not
-> configurable. It answers `status`, `subscriptions`, and `nodes` (address-space enumeration) queries
-> — see the [messaging reference](messaging-interface.md#control-plane).
+> There is no per-instance write/read/control *topic*. Reads, writes, and management queries are the
+> UNS `cmd/sb/*` verbs on the library inbox — see the
+> [messaging reference](messaging-interface.md#the-command-surface--cmdsb-verbs).
 
 ### `instances[].subscriptions[]`
 
 | Key | Type | Default | Definition |
 |-----|------|---------|-----------|
-| `id` | string | random UUID | Subscription id (logs and the `subscriptions` query). |
+| `id` | string | random UUID | Subscription id (logs and the `sb/subscriptions` query). |
 | `publishIntervalMs` | number | instance default | This subscription's OPC UA publishing interval. |
 | `include` | array | `[]` | Signal matchers to subscribe to (below). |
 | `exclude` | array | `[]` | Signal matchers to skip (below). |
@@ -149,27 +156,27 @@ shape as `subscriptions[]`), documented in the
 
 | Key | Type | Default | Definition |
 |-----|------|---------|-----------|
-| `namespaceUri` | string | — | OPC UA namespace **URI** (preferred). Resolved to the server's current index at runtime; stable across servers and restarts. If the URI is absent on the server, the matcher is skipped (with a warning). |
+| `namespaceUri` | string | — | OPC UA namespace **URI** (preferred). Resolved to the server's current index at runtime; stable across servers and restarts. If absent on the server, the matcher is skipped (with a warning). |
 | `namespace` | number | `0` | Literal namespace index; used only when `namespaceUri` is absent. |
 | `match` | string (regex) | `".*"` | Java regex. **Include** matches identifier, browse name, or display name. **Exclude** matches the identifier only. |
-| `topic` | string (template) | inherits `publish.topic` | Per-signal publish-topic override (include). |
 | `samplingRateMs` | number | instance default | Monitored-item sampling interval. |
 | `queueSize` | number | instance default | Monitored-item queue size. |
 | `deadband` | object | `{type:"None"}` | `type`: `None`/`Absolute`/`Percent`; `value`: number. |
 
-A node is subscribed when it matches **any** `include` matcher and **no** `exclude` matcher.
+A node is subscribed when it matches **any** `include` matcher and **no** `exclude` matcher. (A
+per-matcher `topic` override is no longer honored — addressing is UNS-minted; the key is ignored.)
 
 ## Template variables
 
-Substituted into any topic template:
+Substituted into **filesystem-path** templates (PKI dir, cert paths) — not topics (which are
+UNS-minted):
 
 | Variable | Resolves to |
 |----------|-------------|
 | `{ThingName}` | the `-t/--thing` value (or platform identity) |
 | `{ComponentName}` / `{ComponentFullName}` | the component's short / fully-qualified name |
 | `{InstanceId}` | the instance `id` |
-| `{signalId}` | the OPC UA node identifier (publish topics only, per signal) |
-| `{<key>}` | any key under the top-level `tags` (e.g. `{site}`) |
+| `{<key>}` | any key under the top-level `tags` |
 
 ## Precedence
 
@@ -186,9 +193,11 @@ setting.
 
 ```jsonc
 {
-  "tags": { "appId": "kep1", "site": "plant1", "shop": "assembly", "line": "5" },
+  "hierarchy": { "levels": ["site", "shop", "line", "device"] },
+  "identity":  { "site": "plant1", "shop": "assembly", "line": "5" },
+  "tags":      { "appId": "kep1" },
   "messaging": { "local": { "type": "mqtt", "host": "localhost", "port": 1883 } },
-  "metricEmission": { "target": "messaging", "targetConfig": { "topic": "metrics/{ThingName}/{ComponentName}" } },
+  "metricEmission": { "target": "messaging", "targetConfig": { "destination": "local" } },
   "component": {
     "global": { "defaults": { "publishIntervalMs": 1000, "samplingRateMs": 500, "queueSize": 100 } },
     "instances": [
@@ -196,9 +205,8 @@ setting.
         "id": "kep1",
         "adapter": "opcua",
         "connection": { "endpoint": "opc.tcp://192.168.1.50:49320/", "securityPolicy": "None" },
-        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 1000 },
-        "write":   { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
-        "read":    { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
+        "publish": { "batchMs": 1000 },
+        "writes":  { "allow": [ "ns=2;s=Channel1.Device1.Setpoint" ] },
         "subscriptions": [
           {
             "id": "sines",
@@ -221,6 +229,7 @@ setting.
 The current build ignores these (documented to prevent misplaced trust):
 
 - `component.global.healthThresholds.staleSignalSecs` and a `staleSignals` health measure — the
-  `southbound_health` metric emits only `connectionState` and `readErrors`.
+  `southbound_health` metric emits `connectionState`, `readErrors`, and `writeErrors`.
 - `connection.trust.autoTrustServerCert` — there is no auto-trust; trust the server certificate
   explicitly.
+- a signal matcher's `topic` key — per-signal topic overrides are retired (addressing is UNS-minted).

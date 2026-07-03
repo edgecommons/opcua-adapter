@@ -122,49 +122,53 @@ Keep `queueSize ≥ ceil(publishIntervalMs / samplingRateMs)` or the server disc
 
 ## Read and write signals from a client
 
-**Goal:** read or write arbitrary signals on demand from a bus client.
+**Goal:** read or write arbitrary signals on demand from a bus client, using the `cmd/sb/*` verbs.
 
-**Write** (requires `write.enabled: true`) — publish to the write topic. Fire-and-forget by default;
-add `reply_to` (+ `correlation_id`) to get a per-signal `SouthboundWriteResult` acknowledgment:
-```
-publish   topic: southbound/<ComponentName>/<InstanceId>/write
-          payload: { "header": { "reply_to": "app/replies/write1", "correlation_id": "write1" },
-                     "body": { "writes": [ { "namespaceUri": "urn:kepware:KEPServerEX", "signalId": "…Setpoint", "value": 42.5 } ] } }
-subscribe topic: app/replies/write1   → a SouthboundWriteResult (status SUCCESS/FAILED per entry, in request order)
-```
-Omit `header` (just publish the body) for the old fire-and-forget behavior.
+Both are request/reply on the component's UNS command inbox
+(`ecv1/{device}/OpcUaAdapter/main/cmd/sb/{verb}`), with the request's `header.name` equal to the verb
+and a target `instance` in the body (optional when only one instance is connected). The reply body is
+`{ "ok": true, "result": … }` or `{ "ok": false, "error": {code,message} }`.
 
-**Read** — request/reply; set `reply_to` and `correlation_id`, subscribe to your reply topic. Select
-signals either by an explicit list, or by regex `include`/`exclude` matchers (the same shape used by
-`subscriptions[].include`/`exclude`) to read an ad-hoc set without naming every signal:
+**Write** — the target's stable `signal.id` must be in the instance's `writes.allow[]` (else it comes
+back `FAILED` and raises `evt/warning/write-rejected`):
 ```
-publish   topic: southbound/<ComponentName>/<InstanceId>/read
-          payload: { "header": { "reply_to": "app/replies/42", "correlation_id": "42" },
-                     "body": { "signals": [ { "namespaceUri": "urn:kepware:KEPServerEX", "signalId": "…Counter" } ],
+publish   topic: ecv1/<device>/OpcUaAdapter/main/cmd/sb/write
+          payload: { "header": { "name": "sb/write", "reply_to": "app/replies/write1", "correlation_id": "write1" },
+                     "body": { "instance": "kep1",
+                               "writes": [ { "namespaceUri": "urn:kepware:KEPServerEX", "signalId": "…Setpoint", "value": 42.5 } ] } }
+subscribe topic: app/replies/write1   → { "ok": true, "result": { "id": "kep1", "writes": [ … per-entry SUCCESS/FAILED … ] } }
+```
+
+**Read** — select signals by an explicit list, or by regex `include`/`exclude` matchers (the same
+shape as `subscriptions[].include`/`exclude`) to read an ad-hoc set:
+```
+publish   topic: ecv1/<device>/OpcUaAdapter/main/cmd/sb/read
+          payload: { "header": { "name": "sb/read", "reply_to": "app/replies/42", "correlation_id": "42" },
+                     "body": { "instance": "kep1",
+                               "signals": [ { "namespaceUri": "urn:kepware:KEPServerEX", "signalId": "…Counter" } ],
                                "include": [ { "namespaceUri": "urn:kepware:KEPServerEX", "match": "^Channel1\\.Device1\\..*" } ],
                                "exclude": [ { "namespaceUri": "urn:kepware:KEPServerEX", "match": "\\.Diagnostics\\." } ] } }
-subscribe topic: app/replies/42   → a SouthboundReadResult with correlation_id "42"
+subscribe topic: app/replies/42   → { "ok": true, "result": { "id": "kep1", "reads": [ … ] } }
 ```
 Address each explicit signal by `namespaceUri` (preferred, resolved at runtime) or a literal `ns`
-index, plus `signalId`; `include` (required to activate matcher-based selection) tests a node's
-identifier/browseName/displayName, `exclude` tests the identifier only. With a GGCommons client, use
-its `request()` API instead of setting the header fields by hand. Full payload schemas are in the
+index, plus `signalId`. With a GGCommons client, use its `request()` API — it sets `header.name`,
+`reply_to`, and `correlation_id` for you. Full payload schemas are in the
 [messaging reference](reference/messaging-interface.md).
 
 ---
 
-## Route specific signals to their own topic
+## Split a subset of signals (e.g. alarms) into their own stream
 
-**Goal:** send a subset of signals (e.g. alarms) to a different topic than the rest.
+**Goal:** treat a subset of signals (alarms, events) differently from the rest.
 
-Set `topic` on the include matcher; it overrides the instance `publish.topic` for those signals:
+Per-signal **topic overrides are retired** — every signal update publishes on the one UNS `data` class
+(`ecv1/{device}/{component}/{instance}/data/{signalPath}`). Split them **downstream** instead:
 
-```jsonc
-"include": [
-  { "namespace": 2, "match": ".*\\.Alarm\\..*", "topic": "alarms/{site}/{InstanceId}/{signalId}" },
-  { "namespace": 2, "match": ".*" }
-]
-```
+- A consumer subscribes `ecv1/+/+/+/data/#` and routes by the payload's `signal.id` / `signal.address`
+  (e.g. an id matching `.*\.Alarms\..*`) into its own sink.
+- Or raise them as first-class events: the adapter already emits operator alarms on the `evt` class
+  (`evt/critical/connection-lost`, `evt/warning/write-rejected`); a follow-on could map alarm signals
+  to `evt` channels for console dashboards.
 
 ---
 
@@ -193,12 +197,16 @@ from the Downward API — typically no args). See the scaffold's `Dockerfile` an
 
 **Goal:** know whether the adapter is connected and working.
 
-- **Health metric** `southbound_health` (`connectionState`, `readErrors`) flows to your
-  `metricEmission.target` (log / messaging / CloudWatch / Prometheus).
-- **Status query:** request/reply on `…/control/status` → `{ connected, metrics }`.
-- **Subscriptions query:** request/reply on `…/control/subscriptions` → the resolved signal list.
-- **Nodes query:** request/reply on `…/control/nodes` → every variable node found browsing the
-  server's address space (id, namespace, name, data type) — useful for discovering what's available
-  to subscribe to, read, or write, independent of what's currently configured.
+- **Health metric** `southbound_health` (`connectionState`, `readErrors`, `writeErrors`) flows to your
+  `metricEmission.target` (log / messaging → UNS `metric` class / CloudWatch / Prometheus).
+- **State keepalive:** the library publishes `ecv1/{device}/OpcUaAdapter/main/state` each heartbeat
+  tick — subscribe `ecv1/+/+/+/state` to see the whole fleet's liveness.
+- **Status query:** `sb/status` verb → `{ id, connected, metrics }`.
+- **Subscriptions query:** `sb/subscriptions` verb → the resolved signal list.
+- **Browse query:** `sb/browse` verb (paged) → every variable node found browsing the server's address
+  space (id, namespace, name, data type) — for discovering what's available to subscribe to, read, or
+  write, independent of what's currently configured. `sb/rescan` refreshes it.
+- **Events:** `evt/critical/connection-lost` / `evt/connection-restored` on session transitions, and
+  `evt/warning/write-rejected` when a write fails the allow-list — subscribe `ecv1/+/+/+/evt/#`.
 - **Logs:** each subsystem logs under its own name with the `[<instanceId>]` prefix; raise detail with
   `logging.level`.

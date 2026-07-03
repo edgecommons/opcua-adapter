@@ -5,6 +5,7 @@
   },
   "heartbeat": {
     "intervalSecs": 5,
+    "destination": "local",
     "measures": {
       "cpu": true,
       "memory": true,
@@ -12,21 +13,12 @@
       "files": true,
       "threads": true,
       "fds": true
-    },
-    "targets": [
-      {
-        "type": "messaging",
-        "config": {
-          "destination": "ipc"
-        }
-      }
-    ]
+    }
   },
+  "hierarchy": { "levels": ["site", "shop", "line", "device"] },
+  "identity": { "site": "site1", "shop": "shop1", "line": "line1" },
   "tags": {
-    "appId": "IntelliJIdea",
-    "site": "site1",
-    "shop": "shop1",
-    "line": "line1"
+    "appId": "IntelliJIdea"
   },
   "metricEmission": {
     "target": "log",

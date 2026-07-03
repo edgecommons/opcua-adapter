@@ -56,25 +56,26 @@ to integrating with it.
 flowchart LR
     SRV["OPC UA server(s)<br/>opc.tcp://"]
     DEV["OPC UA Adapter<br/>one instance per server"]
-    DP["<b>Data plane</b><br/>signal updates · reads · writes"]
-    CP["<b>Control plane</b><br/>status · subscriptions · nodes · health"]
+    DP["<b>Data plane</b><br/>data class · sb/read · sb/write"]
+    CP["<b>Control plane</b><br/>sb/status · sb/subscriptions · sb/browse · evt · health"]
     SRV <-->|"browse · subscribe · read · write"| DEV
     DEV <--> DP
     DEV <--> CP
 ```
 
 The **data plane** carries process values. It is the high-volume traffic: a continuous stream of signal
-updates flowing out to the bus, plus on-demand reads and writes of signal values. This is the reason the
-adapter exists.
+updates flowing out to the bus on the UNS **`data`** class
+(`ecv1/{device}/{component}/{instance}/data/{signalPath}`), plus on-demand reads and writes via the
+`sb/read` / `sb/write` command verbs. This is the reason the adapter exists.
 
 The **control plane** carries management. It is low-volume and about the *adapter itself* rather than
-the process: "are you connected?", "what are you subscribed to?", "what's available on the server?",
-and the health metric the adapter emits. A monitoring system lives here; a process historian lives on
-the data plane.
+the process: "are you connected?" (`sb/status`), "what are you subscribed to?" (`sb/subscriptions`),
+"what's available on the server?" (`sb/browse`), the operator `evt` alarms, and the `southbound_health`
+metric. A monitoring system lives here; a process historian lives on the data plane.
 
-The split tells an integrator what to build. A consumer of telemetry subscribes to the data-plane
-update topics and ignores the rest. An operations dashboard issues control-plane queries and watches
-the health metric. The exact topics and payloads are in the
+The split tells an integrator what to build. A consumer of telemetry subscribes one UNS wildcard,
+`ecv1/+/+/+/data/#`, and ignores the rest. An operations dashboard issues the `cmd/sb/*` queries,
+watches `ecv1/+/+/+/evt/#`, and reads the health metric. The exact topics and payloads are in the
 [messaging reference](reference/messaging-interface.md).
 
 ## The timing pipeline (the thing most worth understanding)
@@ -161,6 +162,15 @@ consumers can make decisions without an OPC UA lookup table, while preserving th
 consumers should key on and a protocol-native `address` (`{ns, namespaceUri, nodeId}`) that
 round-trips back to the device for reads and writes. The address reports the namespace **URI**
 alongside the index, so the round-trip identity does not depend on a volatile index either.
+
+**Where the enterprise identity lives (UNS).** Separately from that per-signal identity, *every*
+message the adapter publishes carries a top-level **`identity`** element — the enterprise hierarchy
+(`site/shop/line/device`, from the `hierarchy` + `identity` config), the component, and the instance —
+stamped automatically by the library. Routing and partitioning read that element (or the topic's
+`device/component/instance` segments); they never parse the body. The site hierarchy is **not** in the
+data topic and is **not** in `tags` (the old `tags.thing` is gone) — it is the `identity` element. The
+adapter mints its `data`/`evt` topics through the per-instance `gg.instance(id).uns()` builder, which
+enforces the UNS grammar and the IoT-Core topic-depth guard at build time.
 
 ## The security model
 

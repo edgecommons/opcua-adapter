@@ -5,12 +5,24 @@ import com.google.gson.JsonObject;
 import com.mbreissi.ggcommons.config.ConfigManager;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Resolved configuration for one OPC UA device instance (one {@code component.instances[]} entry),
  * following the southbound config convention (docs/SOUTHBOUND.md §4). Instance-level {@code defaults}
  * override {@code component.global.defaults}.
+ *
+ * <p><b>UNS migration.</b> The legacy publish/read/write/control <em>topic templates</em>
+ * ({@code publish.topic}, {@code read.topic}, {@code write.topic}, and the
+ * {@code southbound/{site}/{ComponentName}/{InstanceId}/{signalId}} scheme) are <b>retired</b>:
+ * signal updates ride the UNS {@code data} class ({@link com.mbreissi.ggcommons.uns.UnsClass#DATA},
+ * topic minted by {@code gg.instance(id).uns()}), and the command surface is the library-owned
+ * {@code cmd/sb/*} inbox. The boolean {@code write.enabled} is replaced by the {@code writes.allow[]}
+ * allow-list (D‑U16), matched against the stable {@code signal.id}. Only the addressing-agnostic keys
+ * survive: {@code id}, {@code connection}, {@code defaults}, {@code publish.batchMs}, and
+ * {@code subscriptions}.
  */
 public class ServerConfiguration {
 
@@ -24,12 +36,8 @@ public class ServerConfiguration {
     private final double defaultPublishIntervalMs;
     private final double defaultSamplingMs;
     private final int defaultQueueSize;
-    private final String publishTopicTemplate;
     private final long batchMs;
-    private final boolean writeEnabled;
-    private final String writeTopic;
-    private final String readTopic;
-    private final String controlTopic;
+    private final Set<String> writesAllow;
     private final List<SubscriptionSpec> subscriptionSpecs = new ArrayList<>();
 
     public ServerConfiguration(ConfigManager config, JsonObject globalConfig, String instanceId) {
@@ -46,23 +54,18 @@ public class ServerConfiguration {
         this.defaultQueueSize = (int) num(iDefaults, gDefaults, "queueSize", DEFAULT_QUEUE_SIZE);
 
         JsonObject publish = inst.has("publish") ? inst.getAsJsonObject("publish") : new JsonObject();
-        this.publishTopicTemplate = publish.has("topic")
-                ? publish.get("topic").getAsString()
-                : "southbound/{ComponentName}/{InstanceId}/{signalId}";
         this.batchMs = publish.has("batchMs") ? publish.get("batchMs").getAsLong() : (long) defaultPublishIntervalMs;
 
-        JsonObject write = inst.has("write") ? inst.getAsJsonObject("write") : new JsonObject();
-        this.writeEnabled = write.has("enabled") && write.get("enabled").getAsBoolean();
-        this.writeTopic = resolveTemplate(write.has("topic")
-                ? write.get("topic").getAsString()
-                : "southbound/{ComponentName}/{InstanceId}/write");
-
-        JsonObject read = inst.has("read") ? inst.getAsJsonObject("read") : new JsonObject();
-        this.readTopic = resolveTemplate(read.has("topic")
-                ? read.get("topic").getAsString()
-                : "southbound/{ComponentName}/{InstanceId}/read");
-
-        this.controlTopic = resolveTemplate("southbound/{ComponentName}/{InstanceId}/control/+");
+        // D-U16 write allow-list: the stable signal.ids (or the wildcard "*") the sb/write verb will
+        // accept. Absent/empty => no writes are accepted (secure-by-default, matching the retired
+        // write.enabled:false default).
+        this.writesAllow = new LinkedHashSet<>();
+        JsonObject writes = inst.has("writes") ? inst.getAsJsonObject("writes") : new JsonObject();
+        if (writes.has("allow")) {
+            for (JsonElement el : writes.getAsJsonArray("allow")) {
+                writesAllow.add(el.getAsString());
+            }
+        }
 
         if (inst.has("subscriptions")) {
             for (JsonElement el : inst.getAsJsonArray("subscriptions")) {
@@ -105,33 +108,34 @@ public class ServerConfiguration {
         return batchMs;
     }
 
-    public boolean isWriteEnabled() {
-        return writeEnabled;
+    /**
+     * Whether {@code sb/write} may write the given <b>stable signal id</b> (the canonical
+     * {@code ns=<ns>;<type>=<id>} form as published in {@code signal.id}). A write is permitted iff
+     * the id is listed verbatim in {@code writes.allow[]} or the list contains the wildcard
+     * {@code "*"}. An absent/empty allow-list rejects every write (D‑U16; secure-by-default).
+     *
+     * @param stableSignalId the target's stable {@code signal.id}
+     * @return {@code true} if the write is allowed
+     */
+    public boolean isWriteAllowed(String stableSignalId) {
+        return writesAllow.contains("*") || writesAllow.contains(stableSignalId);
     }
 
-    public String getWriteTopic() {
-        return writeTopic;
-    }
-
-    public String getReadTopic() {
-        return readTopic;
-    }
-
-    public String getControlTopic() {
-        return controlTopic;
+    /** Whether any {@code writes.allow[]} entry is configured (writes are entirely off when empty). */
+    public boolean isWriteConfigured() {
+        return !writesAllow.isEmpty();
     }
 
     public List<SubscriptionSpec> getSubscriptionSpecs() {
         return subscriptionSpecs;
     }
 
-    /** Resolve the per-signal publish topic, substituting the standard template vars plus {@code {signalId}}. */
-    public String resolvePublishTopic(String overrideTemplate, String signalId) {
-        String template = overrideTemplate != null ? overrideTemplate : publishTopicTemplate;
-        return resolveTemplate(template).replace("{signalId}", signalId);
-    }
-
-    /** Resolve template vars ({ThingName}, {ComponentName}, configured tags) plus the app-local {InstanceId}. */
+    /**
+     * Resolve <b>filesystem/path</b> template variables ({@code {ThingName}}, {@code {ComponentName}},
+     * configured {@code tags}) plus the app-local {@code {InstanceId}} in a config value — used by the
+     * security layer for PKI dir / certificate paths. This is unrelated to UNS topic addressing (those
+     * are minted by {@code gg.instance(id).uns()}); it is ordinary config template substitution.
+     */
     public String resolveTemplate(String template) {
         String resolved = configManager.resolveTemplate(template);
         if (template.contains("{InstanceId}")) {
