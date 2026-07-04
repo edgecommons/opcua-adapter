@@ -4,10 +4,8 @@ import com.google.gson.JsonObject;
 import com.mbreissi.ggcommons.GgInstance;
 import com.mbreissi.ggcommons.config.ConfigManager;
 import com.mbreissi.ggcommons.credentials.CredentialService;
-import com.mbreissi.ggcommons.messaging.Message;
-import com.mbreissi.ggcommons.messaging.MessagingClient;
+import com.mbreissi.ggcommons.facades.EventsFacade;
 import com.mbreissi.ggcommons.metrics.MetricEmitter;
-import com.mbreissi.ggcommons.uns.UnsClass;
 import com.mbreissi.opcua.opcuaadapter.opc.config.ServerConfiguration;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -23,42 +21,38 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * One OPC UA device connection — the coordinator that wires the focused collaborators:
  * {@link OpcUaConnection} (connect), {@link AddressSpaceBrowser} (browse),
- * {@link SubscriptionManager} (subscribe), {@link SignalUpdatePublisher} (northbound publish onto the
- * UNS {@code data} class), {@link CommandService} (the {@code sb/*} verbs), {@link HealthMetrics}
- * (health metric), and an {@link EventEmitter} (UNS {@code evt} alarms). One per
- * {@code component.instances[]} entry.
+ * {@link SubscriptionManager} (subscribe), {@link SignalUpdatePublisher} (publishes onto the UNS
+ * {@code data} class via the {@code data()} facade), {@link CommandService} (the {@code sb/*} verbs),
+ * {@link HealthMetrics} (health metric), and the instance-bound {@link EventsFacade} (UNS {@code evt}
+ * alarms, DESIGN-class-facades §2.2). One per {@code component.instances[]} entry.
  *
  * <p>Publishing and the command/event surface are all addressed through the per-instance UNS handle
- * ({@link GgInstance}): {@code data}/{@code evt} topics are minted by {@code instance.uns()} and every
- * envelope is stamped with the instance's {@code identity}.
+ * ({@link GgInstance}): {@code data()}/{@code events()} mint their topics and stamp every envelope with
+ * the instance's {@code identity} — this class never hand-mints a topic or hand-builds a body.
  */
 public class OpcUaDevice {
 
     private static final Logger LOGGER = LogManager.getLogger(OpcUaDevice.class);
+
+    /** The alarm type shared by the connection-lost raise and connection-restored clear (same channel). */
+    private static final String CONNECTION_ALARM_TYPE = "connection-lost";
 
     private final ServerConfiguration config;
     private final GgInstance instance;
     private final OpcUaConnection connection;
     private final ClientMetrics counters = new ClientMetrics();
     private final Map<NodeId, UaVariableNode> allNodes = new ConcurrentHashMap<>();
-    private final EventEmitter events;
+    private final EventsFacade events;
     private final CommandService commands;
     private volatile boolean lastConnected;
 
-    public OpcUaDevice(GgInstance instance, MessagingClient messaging, ConfigManager configManager,
+    public OpcUaDevice(GgInstance instance, ConfigManager configManager,
                        MetricEmitter metrics, CredentialService credentials, ServerConfiguration config) {
         this.config = config;
         this.instance = instance;
-        // Operator-facing evt alarms on ecv1/{device}/{component}/{instance}/evt/{channel}; best-effort.
-        this.events = (channel, body) -> {
-            try {
-                String topic = instance.uns().topic(UnsClass.EVT, channel);
-                Message m = instance.newMessage("SouthboundEvent", "1.0").withPayload(body).build();
-                messaging.publish(topic, m);
-            } catch (Exception e) {
-                LOGGER.warn("[{}] failed to emit evt/{}: {}", config.getId(), channel, e.toString());
-            }
-        };
+        // Operator-facing evt alarms/events on ecv1/{device}/{component}/{instance}/evt/{severity}/{type};
+        // the facade derives the channel from the body so it can never disagree with the topic.
+        this.events = instance.events();
 
         HealthMetrics health = new HealthMetrics(metrics, configManager, config.getId(), counters);
 
@@ -71,8 +65,8 @@ public class OpcUaDevice {
         // 2. Browse the address space (weakly-consistent map so sb/rescan can refresh it safely).
         allNodes.putAll(new AddressSpaceBrowser(client, config.getId()).browseAll());
 
-        // 3. Northbound publisher (UNS data class) + subscriptions feeding it.
-        SignalUpdatePublisher publisher = new SignalUpdatePublisher(messaging, instance, config, client.getNamespaceTable());
+        // 3. Publisher (UNS data class, via data()) + subscriptions feeding it.
+        SignalUpdatePublisher publisher = new SignalUpdatePublisher(instance, config, client.getNamespaceTable());
         SubscriptionManager subscriptions = new SubscriptionManager(client, config, allNodes, publisher, counters);
         subscriptions.createAll();
 
@@ -123,12 +117,21 @@ public class OpcUaDevice {
         return result;
     }
 
+    /**
+     * Raises/clears the connection-lost alarm (severity defaults to {@code critical} for both, so the
+     * raise and clear ride the <b>same</b> {@code evt/critical/connection-lost} channel — a console
+     * tracking {@code evt/critical/#} sees both transitions on one topic, replacing the old asymmetric
+     * {@code critical/connection-lost} / {@code connection-restored} channel pair).
+     */
     private void emitConnectionEvent(boolean connected) {
-        JsonObject body = new JsonObject();
-        body.addProperty("id", config.getId());
-        body.addProperty("endpoint", config.getConnection().getEndpoint());
-        body.addProperty("connected", connected);
-        events.emit(connected ? "connection-restored" : "critical/connection-lost", body);
+        JsonObject context = new JsonObject();
+        context.addProperty("id", config.getId());
+        context.addProperty("endpoint", config.getConnection().getEndpoint());
+        if (connected) {
+            events.clearAlarm(CONNECTION_ALARM_TYPE, context);
+        } else {
+            events.raiseAlarm(CONNECTION_ALARM_TYPE, "OPC UA connection lost", context);
+        }
     }
 
     public String getId() {

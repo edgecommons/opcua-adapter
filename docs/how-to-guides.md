@@ -167,8 +167,8 @@ Per-signal **topic overrides are retired** — every signal update publishes on 
 - A consumer subscribes `ecv1/+/+/+/data/#` and routes by the payload's `signal.id` / `signal.address`
   (e.g. an id matching `.*\.Alarms\..*`) into its own sink.
 - Or raise them as first-class events: the adapter already emits operator alarms on the `evt` class
-  (`evt/critical/connection-lost`, `evt/warning/write-rejected`); a follow-on could map alarm signals
-  to `evt` channels for console dashboards.
+  through the library `events()` facade (`evt/critical/connection-lost`, `evt/warning/write-rejected`);
+  a follow-on could map alarm signals to `evt` channels for console dashboards.
 
 ---
 
@@ -206,7 +206,10 @@ from the Downward API — typically no args). See the scaffold's `Dockerfile` an
 - **Browse query:** `sb/browse` verb (paged) → every variable node found browsing the server's address
   space (id, namespace, name, data type) — for discovering what's available to subscribe to, read, or
   write, independent of what's currently configured. `sb/rescan` refreshes it.
-- **Events:** `evt/critical/connection-lost` / `evt/connection-restored` on session transitions, and
-  `evt/warning/write-rejected` when a write fails the allow-list — subscribe `ecv1/+/+/+/evt/#`.
+- **Events:** `evt/critical/connection-lost` on session transitions — the connection-lost **raise**
+  (`alarm:true, active:true`) and the connection-restored **clear** (`alarm:true, active:false`) ride
+  the *same* channel (a console tracking `evt/critical/#` sees both) — and `evt/warning/write-rejected`
+  when a write fails the allow-list. Subscribe `ecv1/+/+/+/evt/#` (or `ecv1/+/+/+/evt/critical/#` for
+  just alarms).
 - **Logs:** each subsystem logs under its own name with the `[<instanceId>]` prefix; raise detail with
   `logging.level`.

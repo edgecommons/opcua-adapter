@@ -11,6 +11,14 @@ see [explanation.md](../explanation.md); for client recipes, see the
 > top-level envelope **`identity`** element (not the topic, not `tags`). The legacy
 > `southbound/{site}/{ComponentName}/{InstanceId}/{signalId}` topic scheme and the `.../control/*`
 > topics are **retired**.
+>
+> **Class-publish facades.** The `data` and `evt` classes are published through the library's
+> `data()`/`events()` facades (DESIGN-class-facades), not a hand-built `messaging.publish(...)` call:
+> the facade constructs and validates the body (quality defaulted to `GOOD` when the adapter doesn't
+> supply one — OPC UA always supplies its own `StatusCode`-derived quality explicitly, so this default
+> never fires for `data`), mints the sanitized channel, and stamps the envelope identity. This is also
+> why `evt`'s channel is always `evt/{severity}/{type}` — the facade derives it from the body's own
+> `severity` + `type`, so the two can never disagree.
 
 ## Envelope
 
@@ -52,9 +60,9 @@ verb's argument object. A GGCommons client's `request()` API sets `header.name`/
 
 | Class | Message | Direction | Topic | Owner |
 |-------|---------|-----------|-------|-------|
-| `data` | `SouthboundSignalUpdate` | adapter → bus | `ecv1/{device}/{component}/{instance}/data/{signalPath}` | adapter |
+| `data` | `SouthboundSignalUpdate` | adapter → bus | `ecv1/{device}/{component}/{instance}/data/{signalPath}` | adapter, via `data()` |
 | `cmd` | `sb/*` verbs (below) | bus ↔ adapter | `ecv1/{device}/{component}/main/cmd/sb/{verb}` | library inbox |
-| `evt` | connection/write alarms | adapter → bus | `ecv1/{device}/{component}/{instance}/evt/{channel}` | adapter |
+| `evt` | connection/write alarms | adapter → bus | `ecv1/{device}/{component}/{instance}/evt/{severity}/{type}` | adapter, via `events()` |
 | `metric` | `southbound_health` | adapter → bus | `ecv1/{device}/{component}/main/metric/southbound_health` | library (via `MetricEmitter`) |
 | `state` | keepalive | adapter → bus | `ecv1/{device}/{component}/main/state` | library (heartbeat) |
 | `cfg` | effective config | adapter → bus | `ecv1/{device}/{component}/main/cfg` | library |
@@ -122,8 +130,13 @@ The complete OPC UA ↔ JSON mapping for every type is in **[data-types.md](data
 
 ### `SouthboundSignalUpdate` (adapter → bus, `data` class)
 
-Published when subscribed signal values change. One message carries one signal's `samples` (one or many,
-per `publish.batchMs`). Topic: `ecv1/{device}/{component}/{instance}/data/{signalPath}`.
+Published when subscribed signal values change, through the library `data()` facade (`instance.data()
+.signal(id).name(…).address(…).device(…).addSamples(…).signalPath(…).publish()` —
+`SignalUpdatePublisher`): the facade constructs this body, defaults an omitted `quality` to `GOOD` and
+an omitted `serverTs` to now, and mints the topic. OPC UA always supplies its own `StatusCode`-derived
+`quality` explicitly (`ValueCodec.normalizeQuality`), so the facade's default never fires here — it
+exists for sources with no native quality notion. One message carries one signal's `samples` (one or
+many, per `publish.batchMs`). Topic: `ecv1/{device}/{component}/{instance}/data/{signalPath}`.
 
 ```jsonc
 "body": {
@@ -290,16 +303,32 @@ place (live subscriptions are unaffected). Result `{ "id": "kep1", "total": <n>,
 
 ## Events (`evt` class)
 
-Operator-facing alarms on `ecv1/{device}/{component}/{instance}/evt/{channel}` (message name
-`SouthboundEvent`):
+Operator-facing alarms/events, published through the library `events()` facade
+(`instance.events().raiseAlarm(…)/.clearAlarm(…)/.emit(…)` — DESIGN-class-facades §2.2) onto
+`ecv1/{device}/{component}/{instance}/evt/{severity}/{type}` (message name `evt`, version `1.0`). The
+facade **derives the channel from the body's own `severity` + `type`**, so the topic and body can never
+disagree — this is the same mechanism the `modbus-adapter` uses, so both adapters' `evt` channels are
+now uniformly `{severity}/{type}` (no more adapters where some events carry a severity segment and
+others don't).
 
-| Channel | When |
-|---------|------|
-| `critical/connection-lost` | the OPC UA session went down |
-| `connection-restored` | the OPC UA session came back up |
-| `warning/write-rejected` | an `sb/write` target failed the `writes.allow[]` allow-list |
+```jsonc
+"body": {
+  "severity":  "critical|warning|info|debug",   // channel token 1
+  "type":      "connection-lost",                // channel token 2 (sanitized)
+  "message":   "OPC UA connection lost",          // optional operator text
+  "timestamp": "2026-07-03T12:00:00Z",            // defaulted to now
+  "context":   { "id": "kep1", "endpoint": "opc.tcp://host:49320/" },
+  "alarm":     true,                              // present only for the connection-lost alarm
+  "active":    true                               // true = raised (lost), false = cleared (restored)
+}
+```
 
-Body carries at least `{ id, endpoint?/signalId?, … }`.
+| Channel | When | Shape |
+|---------|------|-------|
+| `evt/critical/connection-lost` | the OPC UA session goes down (`raiseAlarm`) or comes back up (`clearAlarm`) | **stateful alarm** (`alarm:true`) — the raise (`active:true`) and the restored clear (`active:false`) ride the *same* channel (severity defaults to `critical` for both), so a console tracking `evt/critical/#` sees the full transition on one topic. `context: {id, endpoint}`. |
+| `evt/warning/write-rejected` | an `sb/write` target failed the `writes.allow[]` allow-list | plain event (no `alarm`/`active`); `message` is the rejection reason, `context: {id, signalId}`. |
+
+Subscribe `ecv1/+/+/+/evt/#` for every adapter event, or `ecv1/+/+/+/evt/critical/#` for just alarms.
 
 ## `southbound_health` (metric)
 

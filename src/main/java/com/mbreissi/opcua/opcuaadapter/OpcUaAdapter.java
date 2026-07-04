@@ -5,7 +5,6 @@ import com.mbreissi.ggcommons.GGCommons;
 import com.mbreissi.ggcommons.GGCommonsBuilder;
 import com.mbreissi.ggcommons.config.ConfigManager;
 import com.mbreissi.ggcommons.credentials.CredentialService;
-import com.mbreissi.ggcommons.messaging.MessagingClient;
 import com.mbreissi.ggcommons.metrics.MetricEmitter;
 import com.mbreissi.opcua.opcuaadapter.opc.CommandRegistry;
 import com.mbreissi.opcua.opcuaadapter.opc.OpcUaDevice;
@@ -35,7 +34,6 @@ public class OpcUaAdapter {
 
     private final GGCommons ggCommons;
     private final ConfigManager config;
-    private final MessagingClient messaging;
     private final MetricEmitter metrics;
     private final CredentialService credentials;
     private final CommandRegistry commandRegistry;
@@ -51,7 +49,6 @@ public class OpcUaAdapter {
     public OpcUaAdapter(String[] args) {
         ggCommons = GGCommonsBuilder.create("com.mbreissi.opcua.OpcUaAdapter").withArgs(args).build();
         config = ggCommons.getConfigManager();
-        messaging = ggCommons.getMessaging();
         metrics = ggCommons.getMetrics();
         credentials = ggCommons.getCredentials();   // null when no 'credentials' config section
         // The sb/* command verbs are registered once on the library's single main-instance command
@@ -76,7 +73,7 @@ public class OpcUaAdapter {
                     // The per-message UNS instance token: mints this device's data/evt topics and stamps
                     // its identity. Uses the resolved instance id (= published device.instance).
                     OpcUaDevice device = new OpcUaDevice(ggCommons.instance(serverConfig.getId()),
-                            messaging, config, metrics, credentials, serverConfig);
+                            config, metrics, credentials, serverConfig);
                     synchronized (devices) {
                         devices.add(device);
                     }

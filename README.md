@@ -30,13 +30,16 @@ Full operator/integrator docs are in **[`docs/`](docs/)**, organized by [Diátax
 - **Browse + subscribe** with per-signal sampling rate, queue size, and **deadband**; include/exclude
   matchers by `namespace` + regex over nodeId / browseName / displayName.
 - **Signal-update publishing** — each change → a `SouthboundSignalUpdate` message on the UNS `data`
-  class (normalized `GOOD|BAD|UNCERTAIN` quality + native `qualityRaw` + source/server timestamps),
-  batched per signal, stamped with the top-level `identity`.
+  class, published through the library **`data()` facade** (normalized `GOOD|BAD|UNCERTAIN` quality —
+  passed explicitly from OPC UA's own `StatusCode`, never defaulted — + native `qualityRaw` +
+  source/server timestamps), batched per signal, stamped with the top-level `identity`.
 - **Command surface** — `cmd/sb/*` verbs on the library inbox: `sb/read`, allow-listed `sb/write`
   (confirmed, per-entry ack), `sb/browse` (paged address-space enumeration), `sb/status`,
   `sb/subscriptions`, `sb/rescan`. Multi-instance requests carry an `instance` selector.
-- **Events** — operator-facing `evt` alarms: `critical/connection-lost`, `connection-restored`,
-  `warning/write-rejected`.
+- **Events** — operator-facing `evt` alarms published through the library **`events()` facade**
+  (channel `evt/{severity}/{type}`, derived from the body so it can never disagree with the topic):
+  `evt/critical/connection-lost` (a stateful alarm — the raise and the connection-restored clear ride
+  the same channel), `evt/warning/write-rejected`.
 - **Secure connections** — `Basic256Sha256` / `SignAndEncrypt` with the client cert/key from the
   ggcommons **credentials vault**, a file, or a **PKCS#11** token; explicit server trust.
 - **Health** — a `southbound_health` metric (`connectionState`, `readErrors`, `writeErrors`) on the
@@ -47,8 +50,9 @@ Full operator/integrator docs are in **[`docs/`](docs/)**, organized by [Diátax
 The component-level `CommandRegistry` registers the `sb/*` verbs once on the library inbox and routes
 each request to the right device by its `instance` field. One `OpcUaDevice` per configured instance
 coordinates focused collaborators: `OpcUaConnection` (connect + security) · `AddressSpaceBrowser` ·
-`SubscriptionManager` · `SignalUpdatePublisher` (UNS `data`) · `CommandService` (the `sb/*` logic) ·
-`EventEmitter` (UNS `evt`) · `ValueCodec` · `HealthMetrics`.
+`SubscriptionManager` · `SignalUpdatePublisher` (UNS `data`, via the library `data()` facade) ·
+`CommandService` (the `sb/*` logic) · the library `EventsFacade` (`instance.events()`, UNS `evt`) ·
+`ValueCodec` · `HealthMetrics`.
 
 ## Quickstart (HOST / MQTT, local)
 

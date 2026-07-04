@@ -4,6 +4,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mbreissi.ggcommons.commands.CommandException;
+import com.mbreissi.ggcommons.facades.EventsFacade;
+import com.mbreissi.ggcommons.facades.Severity;
 import com.mbreissi.ggcommons.messaging.Message;
 import com.mbreissi.opcua.opcuaadapter.opc.config.ServerConfiguration;
 import com.mbreissi.opcua.opcuaadapter.opc.config.SignalSpec;
@@ -61,11 +63,11 @@ public class CommandService {
     private final BooleanSupplier connected;
     private final Supplier<Map<String, ResolvedSignal>> resolvedSignals;
     private final Map<NodeId, UaVariableNode> allNodes;
-    private final EventEmitter events;
+    private final EventsFacade events;
 
     public CommandService(OpcUaClient client, ServerConfiguration serverConfig, ClientMetrics counters,
                           BooleanSupplier connected, Supplier<Map<String, ResolvedSignal>> resolvedSignals,
-                          Map<NodeId, UaVariableNode> allNodes, EventEmitter events) {
+                          Map<NodeId, UaVariableNode> allNodes, EventsFacade events) {
         this.client = client;
         this.serverConfig = serverConfig;
         this.counters = counters;
@@ -385,11 +387,12 @@ public class CommandService {
         if (events == null) {
             return;
         }
-        JsonObject body = new JsonObject();
-        body.addProperty("id", serverConfig.getId());
-        body.addProperty("signalId", stableSignalId);
-        body.addProperty("reason", "not in writes.allow[]");
-        events.emit("warning/write-rejected", body);
+        JsonObject context = new JsonObject();
+        context.addProperty("id", serverConfig.getId());
+        context.addProperty("signalId", stableSignalId);
+        // severity=warning + type="write-rejected" -> the facade derives evt/warning/write-rejected
+        // (same channel as before the migration; now non-negotiable, not hand-assembled).
+        events.emit(Severity.WARNING, "write-rejected", "not in writes.allow[]", context);
     }
 
     private static List<SignalSpec> specsFromJson(JsonArray array) {

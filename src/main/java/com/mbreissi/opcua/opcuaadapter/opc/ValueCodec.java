@@ -5,6 +5,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import com.mbreissi.ggcommons.facades.Quality;
+import com.mbreissi.ggcommons.facades.SignalUpdate;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.milo.opcua.stack.core.NamespaceTable;
@@ -38,18 +40,18 @@ public final class ValueCodec {
     private ValueCodec() {
     }
 
-    /** Normalize an OPC UA status code to the contract's {@code GOOD|BAD|UNCERTAIN}. */
-    public static String normalizeQuality(StatusCode sc) {
+    /** Normalize an OPC UA status code to the contract's {@code GOOD|BAD|UNCERTAIN} quality. */
+    public static Quality normalizeQuality(StatusCode sc) {
         if (sc == null) {
-            return "UNCERTAIN";
+            return Quality.UNCERTAIN;
         }
         if (sc.isGood()) {
-            return "GOOD";
+            return Quality.GOOD;
         }
         if (sc.isBad()) {
-            return "BAD";
+            return Quality.BAD;
         }
-        return "UNCERTAIN";
+        return Quality.UNCERTAIN;
     }
 
     /** Build one contract {@code sample}: value, normalized quality + qualityRaw, source/server timestamps. */
@@ -58,11 +60,29 @@ public final class ValueCodec {
         Object v = value.getValue() != null ? value.getValue().getValue() : null;
         sample.add("value", encodeValue(v));
         StatusCode sc = value.getStatusCode();
-        sample.addProperty("quality", normalizeQuality(sc));
+        sample.addProperty("quality", normalizeQuality(sc).wire());
         sample.addProperty("qualityRaw", sc != null ? sc.toString() : "null");
         sample.addProperty("sourceTs", value.getSourceTime() != null ? value.getSourceTime().getJavaInstant().toString() : null);
         sample.addProperty("serverTs", value.getServerTime() != null ? value.getServerTime().getJavaInstant().toString() : null);
         return sample;
+    }
+
+    /**
+     * Build one {@code data()} facade {@link SignalUpdate.Sample}: value + OPC UA's own normalized
+     * quality (passed explicitly so the facade never defaults it) + native {@code qualityRaw} +
+     * source/server timestamps. {@code sourceTs}/{@code serverTs} are left {@code null} when the
+     * server didn't supply one — the facade defaults {@code serverTs} to now and never synthesizes
+     * {@code sourceTs}.
+     */
+    public static SignalUpdate.Sample toSampleParts(DataValue value) {
+        Object v = value.getValue() != null ? value.getValue().getValue() : null;
+        JsonElement jsonValue = encodeValue(v);
+        StatusCode sc = value.getStatusCode();
+        Quality quality = normalizeQuality(sc);
+        String qualityRaw = sc != null ? sc.toString() : null;
+        String sourceTs = value.getSourceTime() != null ? value.getSourceTime().getJavaInstant().toString() : null;
+        String serverTs = value.getServerTime() != null ? value.getServerTime().getJavaInstant().toString() : null;
+        return new SignalUpdate.Sample(jsonValue, quality, qualityRaw, sourceTs, serverTs);
     }
 
     /**

@@ -169,8 +169,12 @@ message the adapter publishes carries a top-level **`identity`** element — the
 stamped automatically by the library. Routing and partitioning read that element (or the topic's
 `device/component/instance` segments); they never parse the body. The site hierarchy is **not** in the
 data topic and is **not** in `tags` (the old `tags.thing` is gone) — it is the `identity` element. The
-adapter mints its `data`/`evt` topics through the per-instance `gg.instance(id).uns()` builder, which
-enforces the UNS grammar and the IoT-Core topic-depth guard at build time.
+adapter never hand-mints a `data`/`evt` topic or hand-builds a body: it goes through the library's
+`instance.data()`/`instance.events()` publish facades, which mint the topic via the per-instance
+`gg.instance(id).uns()` builder (enforcing the UNS grammar and the IoT-Core topic-depth guard at build
+time), stamp the envelope identity, and construct + validate the class body (defaulting an omitted
+`quality`/`serverTs`/`timestamp`, and — for `evt` — deriving the `{severity}/{type}` channel from the
+body so the two can never disagree).
 
 ## The security model
 
