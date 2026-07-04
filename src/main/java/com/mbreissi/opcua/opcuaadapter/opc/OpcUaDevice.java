@@ -141,4 +141,9 @@ public class OpcUaDevice {
     public boolean isConnected() {
         return connection.isConnected();
     }
+
+    /** The configured OPC UA server endpoint URL — the connectivity report's detail (state instances[]). */
+    public String getEndpoint() {
+        return config.getConnection().getEndpoint();
+    }
 }

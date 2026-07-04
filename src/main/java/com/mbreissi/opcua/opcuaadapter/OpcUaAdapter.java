@@ -5,6 +5,7 @@ import com.mbreissi.ggcommons.GGCommons;
 import com.mbreissi.ggcommons.GGCommonsBuilder;
 import com.mbreissi.ggcommons.config.ConfigManager;
 import com.mbreissi.ggcommons.credentials.CredentialService;
+import com.mbreissi.ggcommons.heartbeat.InstanceConnectivity;
 import com.mbreissi.ggcommons.metrics.MetricEmitter;
 import com.mbreissi.opcua.opcuaadapter.opc.CommandRegistry;
 import com.mbreissi.opcua.opcuaadapter.opc.OpcUaDevice;
@@ -13,7 +14,9 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 
 /**
@@ -63,6 +66,25 @@ public class OpcUaAdapter {
         // Register the southbound command surface before any device connects so a console can address
         // it immediately (an as-yet-unconnected instance replies UNKNOWN_INSTANCE, never blocks).
         commandRegistry.registerVerbs();
+
+        // Report each configured OPC UA server's connectivity AT THE INSTANCE LEVEL via the component's
+        // main state keepalive's instances[] (the #1c surface): a server that has not (re)connected reads
+        // disconnected. Identity/data/lifecycle stay under `main`; this is the per-server connectivity view.
+        ggCommons.setInstanceConnectivityProvider(() -> {
+            Map<String, OpcUaDevice> byId = new HashMap<>();
+            synchronized (devices) {
+                for (OpcUaDevice d : devices) {
+                    byId.put(d.getId(), d);
+                }
+            }
+            List<InstanceConnectivity> out = new ArrayList<>();
+            for (String id : config.getInstanceIds()) {
+                OpcUaDevice d = byId.get(id);
+                out.add(InstanceConnectivity.of(id, d != null && d.isConnected(),
+                        d != null ? d.getEndpoint() : null));
+            }
+            return out;
+        });
 
         JsonObject globalConfig = config.getGlobalConfig();
         for (String instanceId : config.getInstanceIds()) {
