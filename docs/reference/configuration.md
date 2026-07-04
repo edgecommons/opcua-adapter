@@ -203,7 +203,6 @@ setting.
     "instances": [
       {
         "id": "kep1",
-        "adapter": "opcua",
         "connection": { "endpoint": "opc.tcp://192.168.1.50:49320/", "securityPolicy": "None" },
         "publish": { "batchMs": 1000 },
         "writes":  { "allow": [ "ns=2;s=Channel1.Device1.Setpoint" ] },

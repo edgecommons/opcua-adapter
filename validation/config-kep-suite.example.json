@@ -14,7 +14,6 @@
     "instances": [
       {
         "id": "suite",
-        "adapter": "opcua",
         "connection": {
           "endpoint": "opc.tcp://<kep-host>:49320",
           "securityPolicy": "None",

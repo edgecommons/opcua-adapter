@@ -13,7 +13,6 @@
     "instances": [
       {
         "id": "sim1",
-        "adapter": "opcua",
         "connection": { "endpoint": "opc.tcp://localhost:4840/", "securityPolicy": "None" },
         "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 0 },
         "write": { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
@@ -26,7 +25,6 @@
       },
       {
         "id": "kep1",
-        "adapter": "opcua",
         "connection": {
           "endpoint": "opc.tcp://<kep-host>:49320",
           "securityPolicy": "None",

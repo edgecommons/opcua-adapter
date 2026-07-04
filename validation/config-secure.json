@@ -13,7 +13,6 @@
     "instances": [
       {
         "id": "sim1",
-        "adapter": "opcua",
         "connection": {
           "endpoint": "opc.tcp://localhost:4840/",
           "securityPolicy": "Basic256Sha256",

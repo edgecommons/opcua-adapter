@@ -155,7 +155,6 @@ here) or as a separate file passed positionally as `--transport MQTT ./messaging
     "instances": [
       {
         "id": "sim1",
-        "adapter": "opcua",
         "connection": { "endpoint": "opc.tcp://localhost:4840/", "securityPolicy": "None" },
         "publish": { "batchMs": 1000 },
         "writes":  { "allow": [] },
@@ -283,7 +282,6 @@ the **dual-MQTT** messaging block (local broker **and** AWS IoT Core) you would 
     "instances": [
       {
         "id": "kep1",
-        "adapter": "opcua",
         "connection": {
           "endpoint": "opc.tcp://192.168.1.50:49320",
           "securityPolicy": "Basic256Sha256",
@@ -371,7 +369,6 @@ This config bridges a packaging line on a KEPServerEX with two channels (`Channe
   "instances": [
     {
       "id": "kep1",
-      "adapter": "opcua",
       "connection": {
         "endpoint": "opc.tcp://192.168.1.50:49320",
         "securityPolicy": "None",
@@ -581,7 +578,6 @@ data:
         "instances": [
           {
             "id": "kep1",
-            "adapter": "opcua",
             "connection": { "endpoint": "opc.tcp://opcua.default.svc.cluster.local:4840/", "securityPolicy": "None" },
             "publish": { "batchMs": 1000 },
             "writes":  { "allow": [ "ns=2;s=Channel1.Device1.Setpoint" ] },
@@ -621,7 +617,6 @@ listing several `instances` — they share only the process. Mix security and ti
   "instances": [
     {
       "id": "sim1",
-      "adapter": "opcua",
       "connection": { "endpoint": "opc.tcp://10.0.0.11:4840/", "securityPolicy": "None" },
       "publish": { "batchMs": 0 },
       "subscriptions": [
@@ -631,7 +626,6 @@ listing several `instances` — they share only the process. Mix security and ti
     },
     {
       "id": "kep1",
-      "adapter": "opcua",
       "connection": {
         "endpoint": "opc.tcp://10.0.0.50:49320",
         "securityPolicy": "Basic256Sha256", "messageMode": "SignAndEncrypt",

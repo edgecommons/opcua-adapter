@@ -15,7 +15,6 @@
     "instances": [
       {
         "id": "sim1",
-        "adapter": "opcua",
         "connection": { "endpoint": "opc.tcp://localhost:4840/", "securityPolicy": "None" },
         "publish": { "batchMs": 500 },
         "writes": { "allow": [ "ns=2;s=Setpoint" ] },

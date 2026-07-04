@@ -19,7 +19,6 @@
     "instances": [
       {
         "id": "device-1",
-        "adapter": "example",
         "connection": { "endpoint": "example://localhost:0/" },
         "defaults": { "publishIntervalMs": 1000, "samplingRateMs": 500, "queueSize": 100 },
         "publish": { "batchMs": 1000 },
