@@ -55,7 +55,7 @@ public class CommandService {
     public static final String ERR_BAD_MATCHER = "BAD_MATCHER";
 
     /** Status marker on an {@code sb/write} entry rejected by {@code writes.allow[]}. */
-    private static final String WRITE_NOT_ALLOWED = "write not allowed by writes.allow[] (D-U16)";
+    private static final String WRITE_NOT_ALLOWED = "write not allowed by writes.allow[]";
 
     private final OpcUaClient client;
     private final ServerConfiguration serverConfig;

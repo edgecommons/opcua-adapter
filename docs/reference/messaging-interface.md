@@ -192,7 +192,7 @@ The result confirms every request entry **in order**:
       { "namespaceUri": "urn:kepware:KEPServerEX", "signalId": "Channel1.Device1.Setpoint",
         "status": "SUCCESS", "qualityRaw": "Good (0x00000000)" },
       { "signalId": "Channel1.Device1.Locked", "status": "FAILED",
-        "message": "write not allowed by writes.allow[] (D-U16)" }
+        "message": "write not allowed by writes.allow[]" }
     ] } }
 ```
 
