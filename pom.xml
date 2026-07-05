@@ -24,7 +24,7 @@
          ships on the sibling's `feat/unified-namespace` branch which is (still) version 0.1.1 — the
          SAME string as the old published artifact, so the local ~/.m2 install shadows the published
          one for local builds. Bump this to the released pin once the UNS library publishes. -->
-    <ggcommons.version>0.1.1</ggcommons.version>
+    <ggcommons.version>0.2.0</ggcommons.version>
   </properties>
 
   <dependencies>
