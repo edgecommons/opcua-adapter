@@ -25,7 +25,7 @@ Configuration hot-reloads where the source supports it.
 | `component` | yes | Adapter instances and their global defaults (this document). |
 | `hierarchy` | recommended | UNS enterprise hierarchy: an ordered list of level names whose **last** level is the physical node (the device = resolved thing name). Absent ⇒ the default `["device"]`. |
 | `identity` | with `hierarchy` | Values for every hierarchy level **except the last**. Keys must match `hierarchy.levels[0..n-2]`. Stamped onto every message's top-level `identity`. |
-| `tags` | optional | Arbitrary business metadata attached to every message (no location keys — those moved to `identity`). Still usable as `{key}` template variables in **filesystem-path** templates (e.g. PKI dir). |
+| `tags` | optional | Arbitrary business metadata attached to every message (no location keys — those live in `identity`). Usable as `{key}` template variables in **filesystem-path** templates (e.g. PKI dir). |
 | `messaging` | HOST/KUBERNETES | MQTT broker connection (or supply via `--transport MQTT <file>`). On GREENGRASS the transport is IPC. |
 | `topic.includeRoot` | optional | `true` inserts the first hierarchy value (`site`) after the `ecv1` root in built topics (multi-site broker). Default `false` (rootless). |
 | `credentials` | only for `vault` cert source | Enables the encrypted vault used by `clientCertificate.source: "vault"`. |
@@ -126,14 +126,13 @@ One of three sources (`source`):
 
 > **Addressing is UNS-minted.** There is no `publish.topic` — signal updates ride the UNS `data` class
 > (`ecv1/{device}/{component}/{instance}/data/{signalPath}`), where `{signalPath}` is the node's bare
-> identifier sanitized to one channel token. The legacy `publish.topic` template (and per-signal
-> `topic` overrides) are retired.
+> identifier sanitized to one channel token. Per-signal `topic` overrides are not supported.
 
-### `instances[].writes` (D‑U16 allow-list)
+### `instances[].writes` (allow-list)
 
 | Key | Type | Default | Definition |
 |-----|------|---------|-----------|
-| `allow` | string[] | `[]` | Stable `signal.id`s the `sb/write` verb may write (or the wildcard `"*"` = allow all). **Absent/empty ⇒ every write is rejected** (secure-by-default; replaces the boolean `write.enabled: false`). |
+| `allow` | string[] | `[]` | Stable `signal.id`s the `sb/write` verb may write (or the wildcard `"*"` = allow all). **Absent/empty ⇒ every write is rejected** (secure-by-default). |
 
 Matching is **exact** against the target's stable `signal.id` (the `ns=<ns>;<type>=<id>` parseable
 form, as published in `SouthboundSignalUpdate.signal.id`), e.g. `"ns=2;s=Channel1.Device1.Setpoint"`.
@@ -164,7 +163,7 @@ A non-allow-listed write is confirmed `FAILED` and raises `evt/warning/write-rej
 | `deadband` | object | `{type:"None"}` | `type`: `None`/`Absolute`/`Percent`; `value`: number. |
 
 A node is subscribed when it matches **any** `include` matcher and **no** `exclude` matcher. (A
-per-matcher `topic` override is no longer honored — addressing is UNS-minted; the key is ignored.)
+per-matcher `topic` key is ignored — addressing is UNS-minted.)
 
 ## Template variables
 
@@ -223,12 +222,13 @@ setting.
 }
 ```
 
-## Accepted but not implemented
+## Ignored keys
 
-The current build ignores these (documented to prevent misplaced trust):
+These keys are ignored (documented to prevent misplaced trust):
 
 - `component.global.healthThresholds.staleSignalSecs` and a `staleSignals` health measure — the
   `southbound_health` metric emits `connectionState`, `readErrors`, and `writeErrors`.
 - `connection.trust.autoTrustServerCert` — there is no auto-trust; trust the server certificate
   explicitly.
-- a signal matcher's `topic` key — per-signal topic overrides are retired (addressing is UNS-minted).
+- a signal matcher's `topic` key — addressing is UNS-minted, so per-signal topic overrides are not
+  supported.

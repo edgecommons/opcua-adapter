@@ -20,9 +20,8 @@ task recipes see [how-to-guides.md](how-to-guides.md).
 > **UNS addressing (read once).** This adapter is on the ggcommons **Unified Namespace**. Signal
 > updates ride the UNS `data` class — `ecv1/{device}/{component}/{instance}/data/{signalPath}` — with
 > topics minted by the library, not templated in config. The site hierarchy is declared once at the
-> top level (`hierarchy` + `identity`) and carried in every message's `identity` element; the retired
-> `publish.topic` / `write.topic` / `read.topic` / `southbound/…` scheme and `tags.site`-as-topic-var
-> are gone. Reads/writes/queries are the `cmd/sb/*` verbs. Each config below uses these forms.
+> top level (`hierarchy` + `identity`) and carried in every message's `identity` element.
+> Reads/writes/queries are the `cmd/sb/*` verbs. Each config below uses these forms.
 
 This page is organized as:
 
@@ -118,7 +117,7 @@ declared once via `hierarchy` + `identity`:
 > The **stable** `signal.id` in the body (the full `ns=2;s=…` form) is what consumers key on; the
 > `{signalPath}` is only the routing address. A fleet consumer subscribes **one wildcard**,
 > `ecv1/+/+/+/data/#`. To route topics under a `site` root on a multi-site broker, set
-> `topic.includeRoot: true` (needs ≥ 2 hierarchy levels). Per-signal topic overrides are retired.
+> `topic.includeRoot: true` (needs ≥ 2 hierarchy levels). Per-signal topic overrides are not supported.
 
 ---
 
@@ -185,11 +184,11 @@ java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
 | `metricEmission.target` | Where the `southbound_health` metric goes (`log` / `messaging` / `cloudwatch` / `cloudwatchcomponent` / `prometheus`). With `messaging`, health is auto-published on the UNS `metric` class (`ecv1/{device}/{component}/main/metric/southbound_health`) — the topic is minted, so set `targetConfig.destination` (`local`/`iotcore`), **not** a `targetConfig.topic` (the schema rejects it). With `log` it only appears in logs. Observability only. |
 | `component.global.defaults` | Fallback timing for every instance/signal that does not set its own. `publishIntervalMs` (server→adapter delivery cadence), `samplingRateMs` (how often the server samples the value; `0` = as fast as the server allows), `queueSize` (server-side per-signal buffer). See the precedence table at the end. |
 | `instances[].id` | Stable, unique instance id (**required**). Appears as the UNS `{instance}` topic segment and as `device.instance` in messages. Each instance is one OPC UA server with its own connection thread, so renaming it changes topic routing and message identity. |
-| `instances[].adapter` | The southbound **adapter type** that should service this instance. This is a single-protocol binary: it treats *every* listed instance as an OPC UA server (it does **not** filter on this field today), and the published `device.adapter` is always `"opcua"`. Set it to `"opcua"` for clarity and forward-compatibility with the shared southbound convention (where one config can describe instances for several adapter binaries, e.g. an OPC UA and a Modbus adapter). |
+| `instances[].adapter` | The southbound **adapter type** that should service this instance. This is a single-protocol binary: it treats *every* listed instance as an OPC UA server (it does **not** filter on this field), and the published `device.adapter` is always `"opcua"`. Set it to `"opcua"` for clarity and forward-compatibility with the shared southbound convention (where one config can describe instances for several adapter binaries, e.g. an OPC UA and a Modbus adapter). |
 | `connection.endpoint` | The OPC UA server URL (`opc.tcp://host:port/`). The adapter connects here on a dedicated thread and **retries on failure**, so a server that is slow to boot delays only this instance, not the component. Empty by default (you must set it). |
 | `connection.securityPolicy: "None"` | Unencrypted, **anonymous** channel — no certificates required. Fine for a trusted LAN/dev. For a secured server see §3. |
 | `publish.batchMs` | Client-side coalescing window. `1000` here means the adapter buffers a signal's samples and emits **one message per signal per second** (each may carry several `samples`), reducing message count. Set `0` to emit one message the instant each sample arrives (lowest latency, most messages). Defaults to the resolved instance `publishIntervalMs` when omitted. (The topic is UNS-minted — `ecv1/{device}/{component}/{instance}/data/{signalPath}`; there is no `publish.topic`.) |
-| `writes.allow` | The stable `signal.id`s the `sb/write` verb may write (or `"*"` = allow all). Here `[]` accepts **no** writes (secure-by-default, replacing the old `write.enabled: false`). Reads are always available via the `sb/read` verb; there is no separate read topic. |
+| `writes.allow` | The stable `signal.id`s the `sb/write` verb may write (or `"*"` = allow all). Here `[]` accepts **no** writes (secure-by-default). Reads are always available via the `sb/read` verb; there is no separate read topic. |
 | `subscriptions[].include` | The signal matchers to subscribe to. With only `{ "match": "Sine.*" }` and no timing overrides, these signals inherit `global.defaults`. (`Sine.*` whole-string-matches identifiers/names like `Sine1`, `Sine2`.) |
 
 ---
@@ -242,7 +241,7 @@ java -jar OpcUaAdapter-1.0.0.jar --platform GREENGRASS -t my-thing
 | Difference from HOST | Effect on runtime behavior |
 |----------------------|----------------------------|
 | No `messaging` section; transport is IPC | The adapter publishes/subscribes through the Nucleus's local IPC pub/sub (and the IoT Core mqttproxy) instead of a TCP MQTT broker. The recipe's `accessControl` grants the IPC and `mqttproxy` topics; the message envelope on the wire is identical to HOST. |
-| `heartbeat.destination: "local"` | Routes the UNS `state` keepalive over the local/IPC transport (on GREENGRASS that is IPC). On HOST it goes to the local MQTT broker. Use `"iotcore"` to push it to AWS IoT Core instead (see §5). The legacy `heartbeat.targets[]` array is removed — heartbeat config is now `{enabled, intervalSecs, measures, destination}`. |
+| `heartbeat.destination: "local"` | Routes the UNS `state` keepalive over the local/IPC transport (on GREENGRASS that is IPC). On HOST it goes to the local MQTT broker. Use `"iotcore"` to push it to AWS IoT Core instead (see §5). Heartbeat config is `{enabled, intervalSecs, measures, destination}`. |
 | `metricEmission.target: "log"` with a `/greengrass/v2/logs/...` path | Health metrics are written to the Nucleus-managed component log directory rather than published — convenient because Greengrass already rotates and ships those logs. |
 | `connection` / `publish` / `subscriptions` | **Identical semantics to HOST.** The OPC UA side does not know or care about the platform; only the transport and config source change. You can lift an instance verbatim between HOST and GREENGRASS. |
 | Cloud override | A `aws greengrassv2 create-deployment` merge config patches these same keys per device/group, so per-site `endpoint`/`tags`/`subscriptions` differences are deployment data, not code. |
@@ -356,7 +355,7 @@ This config bridges a packaging line on a KEPServerEX with two channels (`Channe
 - **`alarms`** — every alarm signal across all channels, captured at the server's fastest sampling so no
   transition is missed. No deadband (you never want to deadband a discrete alarm). (These publish on the
   same UNS `data` class as the rest — consumers select alarms by the `signal.id`/`address` in the body,
-  or you split them out with a separate `evt`-emitting consumer. Per-signal topic overrides are retired.)
+  or you split them out with a separate `evt`-emitting consumer.)
 - **`diagnostics`** — the slow housekeeping you *do* want (server clock, comms counters) at a 10 s
   cadence so it costs almost nothing.
 
@@ -445,7 +444,7 @@ What this achieves, signal by signal:
 | `namespaceUri` | per matcher | Pins the OPC UA namespace by its **URI** (preferred). Resolved to the server's current index at connect time and re-resolved on rebuild, so a server that renumbers after a restart is followed automatically. An unresolved URI skips the matcher (with a warning). |
 | `namespace` | per matcher | Literal namespace **index**, used only when `namespaceUri` is absent (default `0`). Indexes are volatile across servers/restarts — use only for servers you know to be stable. |
 | `match` | per matcher | Java regex, **whole-string** match (see the [match rule](#include-vs-exclude-which-nodes-get-subscribed)). On `include` it tests identifier/browse name/display name; on `exclude` the identifier only. Defaults to `.*` (whole namespace) when omitted. |
-| `topic` | per `include` matcher | **Retired** (ignored). Per-signal topic overrides are gone — all signals publish on the UNS `data` class. Split streams downstream by `signal.id`/`address`, or with an `evt`-emitting consumer. |
+| `topic` | per `include` matcher | **Ignored.** All signals publish on the UNS `data` class; split streams downstream by `signal.id`/`address`, or with an `evt`-emitting consumer. |
 | `samplingRateMs` | per matcher | How often the **server samples** the underlying value. `0` = as fast as the server allows; a larger value throttles a noisy source. A signal changing faster than this is only observed at sample boundaries — sampling sets the **resolution**. Inherits the instance/global default when omitted. |
 | `queueSize` | per matcher | Server-side buffer holding samples taken between two publishes. On overflow the **oldest samples are discarded**. Keep `queueSize ≥ ceil(publishIntervalMs / samplingRateMs)` or you silently drop data — here the `process` group is `200/100 = 2`, so `50` is generous. Inherits the instance/global default when omitted. |
 | `deadband` | per matcher | A **server-side** filter applied *before* the queue: the server ignores changes smaller than the threshold, so jitter never enters the pipeline. `type: "Absolute"` suppresses changes below `value` engineering units; `type: "Percent"` expresses `value` as a fraction of the signal's range (requires the server to advertise that range); `type: "None"` (default) disables it. Types are case-sensitive. Never deadband discrete/alarm signals. |

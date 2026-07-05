@@ -161,14 +161,14 @@ index, plus `signalId`. With a GGCommons client, use its `request()` API — it 
 
 **Goal:** treat a subset of signals (alarms, events) differently from the rest.
 
-Per-signal **topic overrides are retired** — every signal update publishes on the one UNS `data` class
-(`ecv1/{device}/{component}/{instance}/data/{signalPath}`). Split them **downstream** instead:
+Every signal update publishes on the one UNS `data` class
+(`ecv1/{device}/{component}/{instance}/data/{signalPath}`); there are no per-signal topic overrides.
+Split them **downstream** instead:
 
 - A consumer subscribes `ecv1/+/+/+/data/#` and routes by the payload's `signal.id` / `signal.address`
   (e.g. an id matching `.*\.Alarms\..*`) into its own sink.
-- Or raise them as first-class events: the adapter already emits operator alarms on the `evt` class
-  through the library `events()` facade (`evt/critical/connection-lost`, `evt/warning/write-rejected`);
-  a follow-on could map alarm signals to `evt` channels for console dashboards.
+- Or raise them as first-class events: the adapter emits operator alarms on the `evt` class
+  through the library `events()` facade (`evt/critical/connection-lost`, `evt/warning/write-rejected`).
 
 ---
 

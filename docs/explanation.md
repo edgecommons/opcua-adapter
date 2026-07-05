@@ -26,15 +26,15 @@ process.
 This independence shapes the runtime behavior. Each instance connects on its own thread and retries
 on failure, so a server that is slow to boot delays only its own instance, not the component. The
 component declares itself *ready* as soon as the first instance is connected and subscribing — a
-useful signal for orchestrators that gate traffic on readiness. Liveness is now event-driven rather
-than polled: a Milo `SessionActivityListener` (in `OpcUaConnection`) flips the instance's `connected`
+useful signal for orchestrators that gate traffic on readiness. Liveness is event-driven: a Milo
+`SessionActivityListener` (in `OpcUaConnection`) flips the instance's `connected`
 state the moment its session drops or recovers, so a server that dies *mid-session* immediately reads
 `connected:false` in `state.instances[]` and raises `evt/critical/connection-lost` — with no active
 probe.
 
 ## Inside an instance: a small set of collaborators
 
-Early versions of this adapter were a single large class. It is now a set of focused collaborators,
+The adapter is a set of focused collaborators,
 each with one responsibility, assembled by a thin coordinator (`OpcUaDevice`):
 
 | Collaborator | Responsibility |
@@ -172,7 +172,7 @@ message the adapter publishes carries a top-level **`identity`** element — the
 (`site/shop/line/device`, from the `hierarchy` + `identity` config), the component, and the instance —
 stamped automatically by the library. Routing and partitioning read that element (or the topic's
 `device/component/instance` segments); they never parse the body. The site hierarchy is **not** in the
-data topic and is **not** in `tags` (the old `tags.thing` is gone) — it is the `identity` element. The
+data topic and is **not** in `tags` — it is the `identity` element. The
 adapter never hand-mints a `data`/`evt` topic or hand-builds a body: it goes through the library's
 `instance.data()`/`instance.events()` publish facades, which mint the topic via the per-instance
 `gg.instance(id).uns()` builder (enforcing the UNS grammar and the IoT-Core topic-depth guard at build

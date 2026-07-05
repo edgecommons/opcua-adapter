@@ -5,15 +5,13 @@ command-line flags. For the data-plane / control-plane model and the reasoning b
 see [explanation.md](../explanation.md); for client recipes, see the
 [how-to guides](../how-to-guides.md).
 
-> **Unified Namespace (UNS).** This adapter is migrated onto the ggcommons UNS core. All topics follow
+> **Unified Namespace (UNS).** This adapter uses the ggcommons UNS core. All topics follow
 > the grammar `ecv1/{device}/{component}/{instance}/{class}[/{channel…}]`, minted by the library's
 > topic builder (`gg.instance(id).uns()`) — never hand-assembled. The site hierarchy rides the
-> top-level envelope **`identity`** element (not the topic, not `tags`). The legacy
-> `southbound/{site}/{ComponentName}/{InstanceId}/{signalId}` topic scheme and the `.../control/*`
-> topics are **retired**.
+> top-level envelope **`identity`** element (not the topic, not `tags`).
 >
 > **Class-publish facades.** The `data` and `evt` classes are published through the library's
-> `data()`/`events()` facades (DESIGN-class-facades), not a hand-built `messaging.publish(...)` call:
+> `data()`/`events()` facades, not a hand-built `messaging.publish(...)` call:
 > the facade constructs and validates the body (quality defaulted to `GOOD` when the adapter doesn't
 > supply one — OPC UA always supplies its own `StatusCode`-derived quality explicitly, so this default
 > never fires for `data`), mints the sanitized channel, and stamps the envelope identity. This is also
@@ -22,7 +20,7 @@ see [explanation.md](../explanation.md); for client recipes, see the
 
 ## Envelope
 
-All messages use the GGCommons JSON envelope — since the UNS change, `{header, identity, tags, body}`:
+All messages use the GGCommons JSON envelope, `{header, identity, tags, body}`:
 
 ```jsonc
 {
@@ -41,15 +39,15 @@ All messages use the GGCommons JSON envelope — since the UNS change, `{header,
     "component": "OpcUaAdapter",
     "instance": "kep1"
   },
-  "tags": { "appId": "adapter", … },  // arbitrary business metadata only — NO `thing` key (removed)
+  "tags": { "appId": "adapter", … },  // arbitrary business metadata only — no `thing` key
   "body": { … }                       // per message type, below
 }
 ```
 
-**Identity, not `tags.thing`.** The enterprise hierarchy comes from the top-level `hierarchy`/`identity`
+**Identity element.** The enterprise hierarchy comes from the top-level `hierarchy`/`identity`
 config blocks (the last hierarchy level is the device = the resolved thing name). Every published
 message is stamped with `identity = {hier, path, component, instance}`; routing/partitioning never
-requires parsing the body *or* the topic. The former `tags.thing` field is gone.
+requires parsing the body *or* the topic.
 
 **Inbound leniency.** A command request's **verb** is the `cmd` topic's channel (after `cmd/`) and the
 envelope's `header.name` must equal it (the library inbox enforces this); the request `body` is the
@@ -78,7 +76,7 @@ verb's argument object. A GGCommons client's `request()` API sets `header.name`/
   directly is rejected. The adapter's health metric reaches `metric/southbound_health` through the
   metric subsystem, not a raw publish.
 - **The command inbox is `main`-instance-only** (`ecv1/{device}/{component}/main/cmd/#`) — one per
-  component, not per device-instance (per-instance inboxes are Phase 5). Multi-instance routing is by
+  component, not per device-instance. Multi-instance routing is by
   the request's `instance` field (see below).
 
 ## The command surface — `cmd/sb/*` verbs
@@ -158,7 +156,7 @@ identity, when resolvable), and `nodeId` (the native identifier). Key consumers 
 ### `sb/write` (confirmed, allow-listed batch)
 
 Writes one or many signal values. A target is written **only** when its stable `signal.id` is in the
-instance's `writes.allow[]` (D‑U16). Request body (a single object without the `writes` array is also
+instance's `writes.allow[]`. Request body (a single object without the `writes` array is also
 accepted):
 
 ```jsonc
@@ -304,12 +302,11 @@ place (live subscriptions are unaffected). Result `{ "id": "kep1", "total": <n>,
 ## Events (`evt` class)
 
 Operator-facing alarms/events, published through the library `events()` facade
-(`instance.events().raiseAlarm(…)/.clearAlarm(…)/.emit(…)` — DESIGN-class-facades §2.2) onto
+(`instance.events().raiseAlarm(…)/.clearAlarm(…)/.emit(…)`) onto
 `ecv1/{device}/{component}/{instance}/evt/{severity}/{type}` (message name `evt`, version `1.0`). The
 facade **derives the channel from the body's own `severity` + `type`**, so the topic and body can never
-disagree — this is the same mechanism the `modbus-adapter` uses, so both adapters' `evt` channels are
-now uniformly `{severity}/{type}` (no more adapters where some events carry a severity segment and
-others don't).
+disagree — the same mechanism the `modbus-adapter` uses, so both adapters' `evt` channels are
+uniformly `{severity}/{type}`.
 
 ```jsonc
 "body": {
