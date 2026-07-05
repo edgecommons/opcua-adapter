@@ -81,6 +81,7 @@ public class OpcUaDevice {
             @Override
             public void run() {
                 publisher.flush();
+                connection.probe();          // active liveness probe: refresh connected() from the live link
                 boolean now = connection.isConnected();
                 health.emit(now);
                 if (now != lastConnected) {
