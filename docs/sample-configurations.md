@@ -80,7 +80,7 @@ Three idioms follow from this:
 > it is server- and configuration-specific. For KEPServerEX it is commonly `Kepware Server` (used in
 > these examples and the adapter's `validation/` configs); the OPC UA Foundation base namespace is
 > `http://opcfoundation.org/UA/` (index 0). Discover the exact strings your server uses with the
-> [`subscriptions` control query](reference/messaging-interface.md#subscriptions-requestreply) — it
+> [`subscriptions` control query](reference/messaging-interface.md#sbsubscriptions) — it
 > echoes the **resolved** `namespace` index and its `namespaceUri` for every subscribed signal — or by
 > reading the server's `NamespaceArray`. Always substitute your server's values.
 

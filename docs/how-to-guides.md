@@ -201,6 +201,10 @@ from the Downward API — typically no args). See the scaffold's `Dockerfile` an
   `metricEmission.target` (log / messaging → UNS `metric` class / CloudWatch / Prometheus).
 - **State keepalive:** the library publishes `ecv1/{device}/OpcUaAdapter/main/state` each heartbeat
   tick — subscribe `ecv1/+/+/+/state` to see the whole fleet's liveness.
+- **Per-server connectivity:** the RUNNING `state` keepalive carries `instances[]` — one
+  `{ instance, connected, detail }` per configured OPC UA server (`detail` is the endpoint URL) — so
+  one `ecv1/+/+/+/state` subscription shows every server's live session state under the one component,
+  the passive counterpart to `sb/status`.
 - **Status query:** `sb/status` verb → `{ id, connected, metrics }`.
 - **Subscriptions query:** `sb/subscriptions` verb → the resolved signal list.
 - **Browse query:** `sb/browse` verb (paged) → every variable node found browsing the server's address

@@ -291,7 +291,7 @@ nodes remain — page again with a higher `offset`).
 |------------|-------|
 | `signalId` | node identifier (bare) |
 | `namespace` | the node's current namespace index |
-| `idType` | `Numeric` \| `String` \| `Guid` \| `Opaque` — echo on a read/write to round-trip a non-string id |
+| `idType` | `Numeric` \| `String` \| `Guid` \| `Opaque` — echo `Numeric`/`Guid` on a read/write to round-trip a non-string id. `Opaque` is reported for discovery only: it is **not** writable/round-trippable (a write/read reconstructs it as a `String` id), matching the `sb/write` field table's `Numeric` \| `String` \| `Guid`. |
 | `namespaceUri` | that namespace's URI, when resolvable |
 | `name` | display name, else browse name; omitted if neither is set |
 | `dataType` | the node's OPC UA scalar type name (e.g. `Double`), or its raw type NodeId; omitted if unreadable |
@@ -342,6 +342,37 @@ via `MetricEmitter`; routed by `metricEmission.target` (`log`/`messaging`/`cloud
 | `writeErrors` | Count | write failures/rejections over the interval |
 
 Dimensions: `instance` (plus auto-injected `coreName`/`component`).
+
+## State keepalive (`state` class)
+
+The library heartbeat publishes a `state` keepalive to `ecv1/{device}/{component}/main/state` each
+tick (`state` is reserved/library-owned — the adapter never publishes it directly). On the
+**RUNNING** keepalive the adapter contributes a per-server connectivity view through the library's
+instance-connectivity provider: the body carries an `instances[]` array with **one entry per
+configured OPC UA server** (`config.getInstanceIds()`), so a console sees every server's liveness
+under the one component — no phantom UNS instance per server.
+
+```jsonc
+"body": {
+  "status": "RUNNING",
+  "uptimeSecs": 3600,
+  "instances": [
+    { "instance": "kep1", "connected": true,  "detail": "opc.tcp://host:49320/" },
+    { "instance": "plc2", "connected": false, "detail": "opc.tcp://plc2:4840/" }
+  ]
+}
+```
+
+| Field | Notes |
+|-------|-------|
+| `instance` | the configured device instance id (`instances[].id`) |
+| `connected` | that server's **live** OPC UA session state — a server that has not yet (re)connected, or one whose session died mid-session, reads `false` (kept live event-driven, no polling; see [explanation.md](../explanation.md)) |
+| `detail` | the server's OPC UA endpoint URL; a server that has *never* connected yet reports `connected:false` with no `detail` |
+
+`instances[]` is the **passive / observable** counterpart to the `sb/status` verb: `sb/status` is a
+pull (request/reply) for one instance's connection + counters, while the keepalive pushes every
+server's `connected` flag on every RUNNING tick with no request. It rides the RUNNING keepalive
+**only** (a `STOPPED` state carries no live instances).
 
 ## CLI
 

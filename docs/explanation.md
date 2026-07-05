@@ -26,7 +26,11 @@ process.
 This independence shapes the runtime behavior. Each instance connects on its own thread and retries
 on failure, so a server that is slow to boot delays only its own instance, not the component. The
 component declares itself *ready* as soon as the first instance is connected and subscribing — a
-useful signal for orchestrators that gate traffic on readiness.
+useful signal for orchestrators that gate traffic on readiness. Liveness is now event-driven rather
+than polled: a Milo `SessionActivityListener` (in `OpcUaConnection`) flips the instance's `connected`
+state the moment its session drops or recovers, so a server that dies *mid-session* immediately reads
+`connected:false` in `state.instances[]` and raises `evt/critical/connection-lost` — with no active
+probe.
 
 ## Inside an instance: a small set of collaborators
 
