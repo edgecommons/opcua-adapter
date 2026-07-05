@@ -81,7 +81,8 @@ public class OpcUaDevice {
             @Override
             public void run() {
                 publisher.flush();
-                connection.probe();          // active liveness probe: refresh connected() from the live link
+                // connection.isConnected() is kept live by Milo's SessionActivityListener (wired in
+                // OpcUaConnection.connect()) — no active probe needed.
                 boolean now = connection.isConnected();
                 health.emit(now);
                 if (now != lastConnected) {

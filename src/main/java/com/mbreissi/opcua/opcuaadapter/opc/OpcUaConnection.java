@@ -18,12 +18,8 @@ import org.eclipse.milo.opcua.stack.core.security.DefaultClientCertificateValida
 import org.eclipse.milo.opcua.stack.core.security.SecurityPolicy;
 import org.eclipse.milo.opcua.stack.core.types.builtin.LocalizedText;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.MessageSecurityMode;
-import org.eclipse.milo.opcua.stack.core.NodeIds;
-import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
-import org.eclipse.milo.opcua.stack.core.types.enumerated.TimestampsToReturn;
-
-import java.util.List;
-import java.util.concurrent.TimeUnit;
+import org.eclipse.milo.opcua.sdk.client.SessionActivityListener;
+import org.eclipse.milo.opcua.sdk.client.UaSession;
 
 /**
  * Owns the OPC UA client connection for one device: creates the client for the configured security
@@ -34,8 +30,6 @@ public class OpcUaConnection {
 
     private static final Logger LOGGER = LogManager.getLogger(OpcUaConnection.class);
     private static final long RETRY_MS = 5000;
-    /** Timeout for the active liveness probe read — a dead server must not hang the device tick. */
-    private static final long PROBE_TIMEOUT_MS = 3000;
 
     private final ServerConfiguration config;
     private final CredentialService credentials;
@@ -51,29 +45,6 @@ public class OpcUaConnection {
         return connected;
     }
 
-    /**
-     * Active liveness probe: reads a cheap, always-present server node ({@code Server ServerStatus
-     * State}). A good read → {@code connected = true}; any failure (dead session/socket, or the
-     * timeout) → {@code connected = false}. Called from the device tick so {@link #isConnected()}
-     * reflects the LIVE state — the initial-connect flag alone never catches a server that dies
-     * mid-session, which would leave the #1c connectivity provider reporting a stale "connected".
-     */
-    public void probe() {
-        OpcUaClient c = client;
-        if (c == null) {
-            connected = false;
-            return;
-        }
-        try {
-            List<DataValue> values = c.readValuesAsync(0.0, TimestampsToReturn.Neither,
-                    List.of(NodeIds.Server_ServerStatus_State)).get(PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-            DataValue v = values.isEmpty() ? null : values.get(0);
-            connected = v != null && v.getStatusCode() != null && v.getStatusCode().isGood();
-        } catch (Exception e) {
-            connected = false;
-        }
-    }
-
     public OpcUaClient getClient() {
         return client;
     }
@@ -87,6 +58,22 @@ public class OpcUaConnection {
             try {
                 client = createClient(endpoint, policy);
                 client.connect();
+                // Event-driven liveness (#1c): Milo fires onSessionInactive when the session drops
+                // (server death / socket loss) and onSessionActive when it reconnects. This keeps
+                // isConnected() live WITHOUT polling — the initial-connect flag alone never catches a
+                // server that dies mid-session (which left the connectivity provider reporting a stale
+                // "connected"). Attached once per client; the client owns its own reconnect loop.
+                client.addSessionActivityListener(new SessionActivityListener() {
+                    @Override
+                    public void onSessionActive(UaSession session) {
+                        connected = true;
+                    }
+
+                    @Override
+                    public void onSessionInactive(UaSession session) {
+                        connected = false;
+                    }
+                });
                 connected = true;
                 LOGGER.info("[{}] connected to {} (policy={})", config.getId(), endpoint, policy);
             } catch (Exception e) {
