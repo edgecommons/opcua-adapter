@@ -266,7 +266,7 @@ the **dual-MQTT** messaging block (local broker **and** AWS IoT Core) you would 
 
   "messaging": {
     "local":   { "type": "mqtt", "host": "localhost", "port": 1883, "clientId": "opcua-adapter" },
-    "iotCore": {
+    "northbound": {
       "endpoint": "xxxx-ats.iot.us-east-1.amazonaws.com",
       "port": 8883,
       "clientId": "opcua-adapter",
@@ -308,7 +308,7 @@ the **dual-MQTT** messaging block (local broker **and** AWS IoT Core) you would 
 
 | Option | Effect on runtime behavior |
 |--------|----------------------------|
-| `messaging.iotCore` | Adds the **cloud** half of the dual-MQTT transport. The adapter connects to the local broker **and** to AWS IoT Core over mutual TLS on `8883`. `credentials.certPath`/`keyPath`/`caPath` are the device's X.509 identity for IoT Core; a missing/expired cert means the cloud leg fails to connect (the local leg is unaffected). **Note:** connecting both legs does not by itself send signal updates to the cloud — the adapter's signal-update `publish` goes to the **local** bus only; see [§5](#5-northbound-from-the-local-bus-to-the-cloud) for what actually traverses the IoT Core leg and how. |
+| `messaging.northbound` | Adds the **cloud** half of the dual-MQTT transport. The adapter connects to the local broker **and** to AWS IoT Core over mutual TLS on `8883`. `credentials.certPath`/`keyPath`/`caPath` are the device's X.509 identity for IoT Core; a missing/expired cert means the cloud leg fails to connect (the local leg is unaffected). **Note:** connecting both legs does not by itself send signal updates to the cloud — the adapter's signal-update `publish` goes to the **local** bus only; see [§5](#5-northbound-from-the-local-bus-to-the-cloud) for what actually traverses the IoT Core leg and how. |
 | `credentials` | Enables the encrypted local vault. **Required** whenever any `source: "vault"` reference is used (here for the client cert and the OPC UA user). Without it, those references cannot resolve and the secure connection fails to start. `vault.path` supports template variables. |
 
 ### Connection & security options
@@ -496,14 +496,14 @@ bridge, the rules engine — read those topics.
 **What the adapter sends to the cloud itself.** The one northbound path the adapter wires directly is
 its own *operational* telemetry — the heartbeat and the health metric. The library can deliver them
 straight to AWS IoT Core alongside the local bus: on `HOST`/`KUBERNETES` the dual-MQTT provider holds
-the IoT Core mTLS session next to the local one. Opt in with `messaging.iotCore` plus a heartbeat /
-metric target set to `destination: "iotcore"`:
+the northbound mTLS session next to the local one. Opt in with `messaging.northbound` plus a heartbeat /
+metric target set to `destination: "northbound"`:
 
 ```jsonc
 {
   "messaging": {
     "local":   { "type": "mqtt", "host": "localhost", "port": 1883, "clientId": "opcua-line1" },
-    "iotCore": {
+    "northbound": {
       "endpoint": "a1b2c3d4e5f6g7-ats.iot.us-east-1.amazonaws.com",
       "port": 8883,
       "clientId": "opcua-line1",
@@ -529,8 +529,8 @@ metric target set to `destination: "iotcore"`:
 }
 ```
 
-On `GREENGRASS` the same `destination: "iotcore"` routes through the Nucleus' IoT Core connection, so
-`messaging.iotCore` is not needed there.
+On `GREENGRASS` the same `destination: "northbound"` routes through the Nucleus' IoT Core connection, so
+`messaging.northbound` is not needed there.
 
 **Forwarding the signal data itself.** The adapter does **not** push signal telemetry off-box — it
 publishes locally and stops there. Getting that data to the cloud is a deployment choice, handled by a
