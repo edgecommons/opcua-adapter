@@ -1,6 +1,6 @@
 # Reference — Data Types
 
-How OPC UA values map to the on-wire ggcommons JSON, in both directions. The adapter converts every
+How OPC UA values map to the on-wire edgecommons JSON, in both directions. The adapter converts every
 value through one codec (`ValueCodec`): **read** = OPC UA → JSON (`toSample`), **write** = JSON → OPC UA
 (`variantFromValue`). The same rules apply to a subscribed `SouthboundSignalUpdate` sample, an on-demand
 read result, and a write request.

@@ -1,13 +1,13 @@
-# OPC UA Adapter (`com.mbreissi.opcua.OpcUaAdapter`)
+# OPC UA Adapter (`com.mbreissi.edgecommons.OpcUaAdapter`)
 
 An AWS IoT Greengrass v2 **southbound protocol adapter** that bridges **OPC UA** servers onto the
-GGCommons messaging bus, built on the `ggcommons` **Unified Namespace (UNS)** library and **Eclipse
+EdgeCommons messaging bus, built on the `edgecommons` **Unified Namespace (UNS)** library and **Eclipse
 Milo 1.1.x**. It browses each server, subscribes to signals, and republishes value changes using the
 cross-language **southbound contract** (`SouthboundSignalUpdate`) on the UNS **`data`** class, and
 exposes a `cmd/sb/*` command surface for on-demand **read**, allow-listed **write**, and management
 queries.
 
-Migrated onto the ggcommons UNS core: signal updates ride
+Migrated onto the edgecommons UNS core: signal updates ride
 `ecv1/{device}/{component}/{instance}/data/{signalPath}` (topics minted by `gg.instance(id).uns()`, the
 site hierarchy carried in the top-level envelope `identity` — not `tags.thing`); the command surface is
 the library-owned `cmd/sb/*` inbox; write access is gated by a `writes.allow[]` allow-list. Also
@@ -41,7 +41,7 @@ Full operator/integrator docs are in **[`docs/`](docs/)**, organized by [Diátax
   `evt/critical/connection-lost` (a stateful alarm — the raise and the connection-restored clear ride
   the same channel), `evt/warning/write-rejected`.
 - **Secure connections** — `Basic256Sha256` / `SignAndEncrypt` with the client cert/key from the
-  ggcommons **credentials vault**, a file, or a **PKCS#11** token; explicit server trust.
+  edgecommons **credentials vault**, a file, or a **PKCS#11** token; explicit server trust.
 - **Health** — a `southbound_health` metric (`connectionState`, `readErrors`, `writeErrors`) on the
   UNS `metric` class.
 
@@ -64,6 +64,6 @@ java -jar target/OpcUaAdapter-1.0.0.jar \
 ```
 Needs a local MQTT broker (e.g. `docker run -d -p 1883:1883 emqx/emqx`). Subscribe to
 `ecv1/+/+/+/data/#` for signal updates (and `ecv1/+/+/+/state`, `ecv1/+/+/+/metric/#` for the
-keepalive and health); drive `ecv1/{thing}/OpcUaAdapter/main/cmd/sb/status` for status. See
+keepalive and health); drive `ecv1/{thing}/opcua-adapter/main/cmd/sb/status` for status. See
 [docs/](docs/) for configuration, the message interface, security, and the other deploy targets. A
 reproducible end-to-end smoke harness lives in [`validation/`](validation/).

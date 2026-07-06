@@ -1,14 +1,29 @@
 {
-  "tags": { "appId": "smoke", "site": "lab", "shop": "s1", "line": "l1" },
-  "logging": { "level": "INFO" },
+  "tags": {
+    "appId": "smoke",
+    "site": "lab",
+    "shop": "s1",
+    "line": "l1"
+  },
+  "logging": {
+    "level": "INFO"
+  },
   "metricEmission": {
     "target": "messaging",
-    "targetConfig": { "topic": "metrics/{ThingName}/{ComponentName}" }
+    "targetConfig": {
+      "topic": "metrics/{ThingName}/{ComponentName}"
+    }
   },
   "component": {
     "global": {
-      "defaults": { "publishIntervalMs": 500, "samplingRateMs": 250, "queueSize": 100 },
-      "healthThresholds": { "staleSignalSecs": 30 }
+      "defaults": {
+        "publishIntervalMs": 500,
+        "samplingRateMs": 250,
+        "queueSize": 100
+      },
+      "healthThresholds": {
+        "staleSignalSecs": 30
+      }
     },
     "instances": [
       {
@@ -30,20 +45,37 @@
             }
           }
         },
-        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 500 },
-        "write": { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
-        "read": { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
+        "publish": {
+          "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}",
+          "batchMs": 500
+        },
+        "write": {
+          "enabled": true,
+          "topic": "southbound/{ComponentName}/{InstanceId}/write"
+        },
+        "read": {
+          "topic": "southbound/{ComponentName}/{InstanceId}/read"
+        },
         "subscriptions": [
           {
             "id": "sines",
             "include": [
-              { "namespace": 2, "match": "Sine.*", "samplingRateMs": 250, "queueSize": 50,
-                "deadband": { "type": "None", "value": 0.0 } }
+              {
+                "namespace": 2,
+                "match": "Sine.*",
+                "samplingRateMs": 250,
+                "queueSize": 50,
+                "deadband": {
+                  "type": "None",
+                  "value": 0.0
+                }
+              }
             ],
             "exclude": []
           }
         ]
       }
-    ]
+    ],
+    "token": "opcua-adapter"
   }
 }

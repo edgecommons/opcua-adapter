@@ -23,7 +23,7 @@ import paho.mqtt.client as mqtt
 
 BROKER_HOST, BROKER_PORT = "localhost", 1883
 REPLY_TOPIC = "southbound/reply/command-parity-smoke"
-SIM_NAMESPACE_URI = "urn:ggcommons:sim"
+SIM_NAMESPACE_URI = "urn:edgecommons:sim"
 
 updates = []    # SouthboundSignalUpdate (used only to derive comp/inst, as in validate.py)
 nodes_replies = []     # "nodes" control replies

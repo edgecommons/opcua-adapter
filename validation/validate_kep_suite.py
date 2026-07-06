@@ -1,12 +1,12 @@
 """Comprehensive integration suite for the OPC UA adapter against a live KEPServerEX.
 
 Prereqs:
-  1. python validation/kep_setup.py        (creates the GGCommonsTest channel/tags; needs admin creds)
+  1. python validation/kep_setup.py        (creates the EdgeCommonsTest channel/tags; needs admin creds)
   2. adapter running with validation/config-kep-suite.json (over EMQX on localhost:1883)
 
 Then: python validation/validate_kep_suite.py
 
-Covers, against real KEP tags (ns=2 "Kepware Server", id "GGCommonsTest.Device1.<name>"):
+Covers, against real KEP tags (ns=2 "Kepware Server", id "EdgeCommonsTest.Device1.<name>"):
   - data-type mapping on subscribe (Boolean/SByte/Byte/Int16/UInt16/Int32/UInt32/Int64/UInt64/Float/Double/String)
   - changing values from simulator functions (RAMP/SINE/USER)
   - include/exclude filtering and per-signal topic override
@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
 
 BROKER_HOST, BROKER_PORT = "localhost", 1883
-PREFIX = "GGCommonsTest.Device1."
+PREFIX = "EdgeCommonsTest.Device1."
 NS = "Kepware Server"
 
 TYPES = ["Boolean", "SByte", "Byte", "Int16", "UInt16", "Int32", "UInt32",
@@ -50,7 +50,7 @@ TYPE_CHECK = {
 WRITE = {
     "Boolean": True, "SByte": -5, "Byte": 200, "Int16": -1234, "UInt16": 50000,
     "Int32": -100000, "UInt32": 3000000000, "Int64": -5000000000, "UInt64": 10000000000,
-    "Float": 12.5, "Double": 1234.5, "String": "ggcommons-suite",
+    "Float": 12.5, "Double": 1234.5, "String": "edgecommons-suite",
 }
 
 msgs = []   # (topic, payload)
@@ -128,7 +128,7 @@ def main():
     c.loop_start()
 
     # --- wait for the adapter to connect + publish a spread of the new signals ---------------
-    print("[*] waiting up to 45s for GGCommonsTest updates...", flush=True)
+    print("[*] waiting up to 45s for EdgeCommonsTest updates...", flush=True)
     deadline = time.time() + 45
     while time.time() < deadline:
         seen = {node_of(p) for _, p in updates() if (node_of(p) or "").startswith(PREFIX)}
@@ -137,7 +137,7 @@ def main():
         time.sleep(0.5)
     seen = {node_of(p) for _, p in updates() if (node_of(p) or "").startswith(PREFIX)}
     if len(seen) < 4:
-        print(f"[!] only {len(seen)} GGCommonsTest signals seen; is the adapter running on config-kep-suite.json?", flush=True)
+        print(f"[!] only {len(seen)} EdgeCommonsTest signals seen; is the adapter running on config-kep-suite.json?", flush=True)
         summarize()
         return
 
@@ -145,7 +145,7 @@ def main():
     comp = inst = None
     for t, p in updates():
         parts = t.split("/")
-        if t.startswith("southbound/") and len(parts) >= 5 and parts[4].startswith("GGCommonsTest"):
+        if t.startswith("southbound/") and len(parts) >= 5 and parts[4].startswith("EdgeCommonsTest"):
             comp, inst = parts[2], parts[3]
             break
     if not comp:

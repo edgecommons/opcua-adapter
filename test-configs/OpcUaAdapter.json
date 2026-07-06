@@ -1,39 +1,80 @@
 {
-  "hierarchy": { "levels": ["site", "shop", "line", "device"] },
-  "identity": { "site": "site1", "shop": "shop1", "line": "line1" },
+  "hierarchy": {
+    "levels": [
+      "site",
+      "shop",
+      "line",
+      "device"
+    ]
+  },
+  "identity": {
+    "site": "site1",
+    "shop": "shop1",
+    "line": "line1"
+  },
   "tags": {
     "appId": "adapter"
   },
   "messaging": {
-    "local": { "host": "localhost", "port": 1883 }
+    "local": {
+      "host": "localhost",
+      "port": 1883
+    }
   },
   "metricEmission": {
     "target": "messaging",
-    "targetConfig": { "destination": "local" }
+    "targetConfig": {
+      "destination": "local"
+    }
   },
   "component": {
     "global": {
-      "defaults": { "publishIntervalMs": 1000, "samplingRateMs": 500, "queueSize": 100 },
-      "healthThresholds": { "staleSignalSecs": 30 }
+      "defaults": {
+        "publishIntervalMs": 1000,
+        "samplingRateMs": 500,
+        "queueSize": 100
+      },
+      "healthThresholds": {
+        "staleSignalSecs": 30
+      }
     },
     "instances": [
       {
         "id": "device-1",
-        "connection": { "endpoint": "example://localhost:0/" },
-        "defaults": { "publishIntervalMs": 1000, "samplingRateMs": 500, "queueSize": 100 },
-        "publish": { "batchMs": 1000 },
-        "writes": { "allow": [] },
+        "connection": {
+          "endpoint": "example://localhost:0/"
+        },
+        "defaults": {
+          "publishIntervalMs": 1000,
+          "samplingRateMs": 500,
+          "queueSize": 100
+        },
+        "publish": {
+          "batchMs": 1000
+        },
+        "writes": {
+          "allow": []
+        },
         "subscriptions": [
           {
             "id": "all",
             "include": [
-              { "namespace": 0, "match": ".*", "samplingRateMs": 500, "queueSize": 100,
-                "deadband": { "type": "Absolute", "value": 0.0 } }
+              {
+                "namespace": 0,
+                "match": ".*",
+                "samplingRateMs": 500,
+                "queueSize": 100,
+                "deadband": {
+                  "type": "Absolute",
+                  "value": 0.0
+                }
+              }
             ],
             "exclude": []
           }
         ]
       }
-    ]
+    ],
+    "token": "opcua-adapter"
   }
 }

@@ -15,8 +15,19 @@
       "fds": true
     }
   },
-  "hierarchy": { "levels": ["site", "shop", "line", "device"] },
-  "identity": { "site": "site1", "shop": "shop1", "line": "line1" },
+  "hierarchy": {
+    "levels": [
+      "site",
+      "shop",
+      "line",
+      "device"
+    ]
+  },
+  "identity": {
+    "site": "site1",
+    "shop": "shop1",
+    "line": "line1"
+  },
   "tags": {
     "appId": "IntelliJIdea"
   },
@@ -31,7 +42,7 @@
       "publish_interval": 3,
       "message": "Hello world config_2!"
     },
-    "instances": [
-    ]
+    "instances": [],
+    "token": "opcua-adapter"
   }
 }

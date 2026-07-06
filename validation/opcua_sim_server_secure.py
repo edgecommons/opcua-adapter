@@ -19,9 +19,9 @@ async def main():
     server = Server()
     await server.init()
     server.set_endpoint("opc.tcp://localhost:4840/")
-    server.set_server_name("GGCommons Secure Sim")
+    server.set_server_name("EdgeCommons Secure Sim")
     try:
-        await server.set_application_uri("urn:ggcommons:sim:server")
+        await server.set_application_uri("urn:edgecommons:sim:server")
     except Exception as e:
         print(f"[sim] set_application_uri: {e}", flush=True)
 
@@ -34,7 +34,7 @@ async def main():
     except Exception as e:
         print(f"[sim] validator setup failed, relying on default: {e}", flush=True)
 
-    idx = await server.register_namespace("urn:ggcommons:sim")
+    idx = await server.register_namespace("urn:edgecommons:sim")
     print(f"[sim] namespace index = {idx}", flush=True)
     sim = await server.nodes.objects.add_folder(ua.NodeId("Simulation", idx), ua.QualifiedName("Simulation", idx))
     sine1 = await sim.add_variable(ua.NodeId("Sine1", idx), ua.QualifiedName("Sine1", idx), 0.0)

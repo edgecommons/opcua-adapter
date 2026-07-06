@@ -1,15 +1,30 @@
 {
-  "_comment": "Template for the integration suite (validate_kep_suite.py). Copy to config-kep-suite.json (gitignored) and fill connection.user with a KEP UA account that has read/write. Drop 'user' for anonymous (write tests need write permission). Run validation/kep_setup.py first to create the GGCommonsTest channel.",
-  "tags": { "appId": "suite", "site": "lab", "shop": "s1", "line": "l1" },
-  "logging": { "level": "INFO" },
+  "_comment": "Template for the integration suite (validate_kep_suite.py). Copy to config-kep-suite.json (gitignored) and fill connection.user with a KEP UA account that has read/write. Drop 'user' for anonymous (write tests need write permission). Run validation/kep_setup.py first to create the EdgeCommonsTest channel.",
+  "tags": {
+    "appId": "suite",
+    "site": "lab",
+    "shop": "s1",
+    "line": "l1"
+  },
+  "logging": {
+    "level": "INFO"
+  },
   "metricEmission": {
     "target": "messaging",
-    "targetConfig": { "topic": "metrics/{ThingName}/{ComponentName}" }
+    "targetConfig": {
+      "topic": "metrics/{ThingName}/{ComponentName}"
+    }
   },
   "component": {
     "global": {
-      "defaults": { "publishIntervalMs": 500, "samplingRateMs": 200, "queueSize": 20 },
-      "healthThresholds": { "staleSignalSecs": 30 }
+      "defaults": {
+        "publishIntervalMs": 500,
+        "samplingRateMs": 200,
+        "queueSize": 20
+      },
+      "healthThresholds": {
+        "staleSignalSecs": 30
+      }
     },
     "instances": [
       {
@@ -17,24 +32,50 @@
         "connection": {
           "endpoint": "opc.tcp://<kep-host>:49320",
           "securityPolicy": "None",
-          "user": { "username": "<kep-ua-user>", "password": "<password>" }
+          "user": {
+            "username": "<kep-ua-user>",
+            "password": "<password>"
+          }
         },
-        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 0 },
-        "write": { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
-        "read": { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
+        "publish": {
+          "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}",
+          "batchMs": 0
+        },
+        "write": {
+          "enabled": true,
+          "topic": "southbound/{ComponentName}/{InstanceId}/write"
+        },
+        "read": {
+          "topic": "southbound/{ComponentName}/{InstanceId}/read"
+        },
         "subscriptions": [
           {
             "id": "main",
             "include": [
-              { "namespaceUri": "Kepware Server", "match": "^GGCommonsTest\\.Device1\\.LiveSine$", "topic": "ggtest/live/{signalId}", "samplingRateMs": 200, "queueSize": 20 },
-              { "namespaceUri": "Kepware Server", "match": "^GGCommonsTest\\.Device1\\..*", "samplingRateMs": 200, "queueSize": 20 }
+              {
+                "namespaceUri": "Kepware Server",
+                "match": "^EdgeCommonsTest\\.Device1\\.LiveSine$",
+                "topic": "ggtest/live/{signalId}",
+                "samplingRateMs": 200,
+                "queueSize": 20
+              },
+              {
+                "namespaceUri": "Kepware Server",
+                "match": "^EdgeCommonsTest\\.Device1\\..*",
+                "samplingRateMs": 200,
+                "queueSize": 20
+              }
             ],
             "exclude": [
-              { "namespaceUri": "Kepware Server", "match": "^GGCommonsTest\\.Device1\\.LiveRandom$" }
+              {
+                "namespaceUri": "Kepware Server",
+                "match": "^EdgeCommonsTest\\.Device1\\.LiveRandom$"
+              }
             ]
           }
         ]
       }
-    ]
+    ],
+    "token": "opcua-adapter"
   }
 }

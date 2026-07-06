@@ -20,11 +20,11 @@ async def main():
     server = Server()
     await server.init()
     server.set_endpoint("opc.tcp://localhost:4840/")
-    server.set_server_name("GGCommons Smoke Sim")
+    server.set_server_name("EdgeCommons Smoke Sim")
     # Allow anonymous + no security (matches the adapter's None policy for this smoke).
     server.set_security_policy([ua.SecurityPolicyType.NoSecurity])
 
-    idx = await server.register_namespace("urn:ggcommons:sim")
+    idx = await server.register_namespace("urn:edgecommons:sim")
     print(f"[sim] namespace index = {idx}", flush=True)
 
     sim = await server.nodes.objects.add_folder(ua.NodeId("Simulation", idx),

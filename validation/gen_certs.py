@@ -1,7 +1,7 @@
 """Generate self-signed client + server certs (PEM) with SubjectAltName URIs for the OPC UA secure smoke.
 
-client SAN URI = urn:ggcommons:opcua:adapter  (must match the adapter's derived applicationUri)
-server SAN URI = urn:ggcommons:sim:server     (matches the asyncua server's application URI)
+client SAN URI = urn:edgecommons:opcua:adapter  (must match the adapter's derived applicationUri)
+server SAN URI = urn:edgecommons:sim:server     (matches the asyncua server's application URI)
 """
 import datetime
 import os
@@ -46,5 +46,5 @@ def gen(cn, uri, base):
     print(f"wrote {base}_cert.pem / {base}_key.pem (SAN URI {uri})")
 
 
-gen("GGCommons OPC UA Adapter", "urn:ggcommons:opcua:adapter", f"{SCRATCH}/client")
-gen("GGCommons Smoke Sim", "urn:ggcommons:sim:server", f"{SCRATCH}/server")
+gen("EdgeCommons OPC UA Adapter", "urn:edgecommons:opcua:adapter", f"{SCRATCH}/client")
+gen("EdgeCommons Smoke Sim", "urn:edgecommons:sim:server", f"{SCRATCH}/server")

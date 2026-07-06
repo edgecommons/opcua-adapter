@@ -15,7 +15,7 @@ The adapter reads one JSON document from the `-c/--config` source, which default
 | `KUBERNETES` | `CONFIGMAP` | a mounted ConfigMap directory (re-read on change) |
 
 Adapter settings live under `component`; the sibling sections (`hierarchy`, `identity`, `tags`,
-`messaging`, `credentials`, `logging`, `heartbeat`, `metricEmission`) are standard ggcommons sections.
+`messaging`, `credentials`, `logging`, `heartbeat`, `metricEmission`) are standard edgecommons sections.
 Configuration hot-reloads where the source supports it.
 
 ## Top-level sections
@@ -30,7 +30,7 @@ Configuration hot-reloads where the source supports it.
 | `topic.includeRoot` | optional | `true` inserts the first hierarchy value (`site`) after the `ecv1` root in built topics (multi-site broker). Default `false` (rootless). |
 | `credentials` | only for `vault` cert source | Enables the encrypted vault used by `clientCertificate.source: "vault"`. |
 | `metricEmission` | optional | Routes the `southbound_health` metric (`target`: `log`/`messaging`/`cloudwatch`/`prometheus`). The `metric` topic is UNS-minted — do **not** set a `targetConfig.topic` (the schema rejects it); use `targetConfig.destination` (`local`/`iotcore`) instead. |
-| `logging`, `heartbeat` | optional | Standard ggcommons sections. |
+| `logging`, `heartbeat` | optional | Standard edgecommons sections. |
 
 ### `hierarchy` / `identity` (UNS)
 

@@ -1,6 +1,6 @@
 ---
 RecipeFormatVersion: "2020-01-25"
-ComponentName: "com.mbreissi.opcua.OpcUaAdapter"
+ComponentName: "com.mbreissi.edgecommons.OpcUaAdapter"
 ComponentVersion: "1.0.0"
 ComponentDescription: "OPC UA -> Greengrass southbound adapter (Eclipse Milo)"
 ComponentPublisher: "Marc Breissinger"
@@ -41,7 +41,7 @@ ComponentConfiguration:
         instances: []
     accessControl:
       aws.greengrass.ipc.pubsub:
-        "com.mbreissi.opcua.OpcUaAdapter:ipc:1":
+        "com.mbreissi.edgecommons.OpcUaAdapter:ipc:1":
           policyDescription: Allows access to publish/subscribe to all topics on IPC
           operations:
             - "aws.greengrass#PublishToTopic"
@@ -49,7 +49,7 @@ ComponentConfiguration:
           resources:
             - "*"
       aws.greengrass.ipc.mqttproxy:
-        "com.mbreissi.opcua.OpcUaAdapter:iotcore:1":
+        "com.mbreissi.edgecommons.OpcUaAdapter:iotcore:1":
           policyDescription: Allows access to publish/subscribe to all topics on IoT Core.
           operations:
             - "aws.greengrass#PublishToIoTCore"
@@ -57,7 +57,7 @@ ComponentConfiguration:
           resources:
             - "*"
       aws.greengrass.ShadowManager:
-        "com.mbreissi.opcua.OpcUaAdapter:shadow:1":
+        "com.mbreissi.edgecommons.OpcUaAdapter:shadow:1":
           policyDescription: Allows access to shadows.
           operations:
             - 'aws.greengrass#GetThingShadow'
@@ -78,4 +78,4 @@ Manifests:
         Setenv:
           CONFIG: "{configuration:/ComponentConfig}"
         Script:
-          "java -cp {artifacts:path}/OpcUaAdapter-1.0.0.jar com.mbreissi.opcua.opcuaadapter.OpcUaAdapter --platform GREENGRASS"
+          "java -cp {artifacts:path}/OpcUaAdapter-1.0.0.jar com.mbreissi.edgecommons.opcua.OpcUaAdapter --platform GREENGRASS"

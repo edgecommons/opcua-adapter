@@ -1,7 +1,7 @@
 # Sample Configurations
 
 Complete, ready-to-adapt configurations for the OPC UA adapter
-(`com.mbreissi.opcua.OpcUaAdapter`), one per realistic deployment scenario. Each sample is a valid
+(`com.mbreissi.edgecommons.OpcUaAdapter`), one per realistic deployment scenario. Each sample is a valid
 config document; the prose after it explains **what every option does and how it changes runtime
 behavior** — data rate, latency, addressing, security, and reconnect/health.
 
@@ -14,10 +14,10 @@ task recipes see [how-to-guides.md](how-to-guides.md).
 > source, which defaults by platform: `HOST` → `FILE`, `GREENGRASS` → `GG_CONFIG` (the deployment),
 > `KUBERNETES` → `CONFIGMAP` (a mounted directory, hot-reloaded). Adapter settings live under
 > `component`; the sibling sections (`hierarchy`, `identity`, `tags`, `messaging`, `logging`,
-> `heartbeat`, `metricEmission`, `credentials`, `streaming`) are standard ggcommons sections validated
+> `heartbeat`, `metricEmission`, `credentials`, `streaming`) are standard edgecommons sections validated
 > against the canonical [config schema](reference/configuration.md).
 
-> **UNS addressing (read once).** This adapter is on the ggcommons **Unified Namespace**. Signal
+> **UNS addressing (read once).** This adapter is on the edgecommons **Unified Namespace**. Signal
 > updates ride the UNS `data` class — `ecv1/{device}/{component}/{instance}/data/{signalPath}` — with
 > topics minted by the library, not templated in config. The site hierarchy is declared once at the
 > top level (`hierarchy` + `identity`) and carried in every message's `identity` element.
@@ -95,7 +95,7 @@ ecv1/{device}/{component}/{instance}/data/{signalPath}
 | Segment | Resolves to | Source |
 |---------|-------------|--------|
 | `{device}` | the resolved thing name = the **last** `hierarchy.levels` entry | `-t/--thing` / platform |
-| `{component}` | the component short name → `OpcUaAdapter` | binary |
+| `{component}` | the component UNS token → `opcua-adapter` | binary |
 | `{instance}` | the instance `id` (e.g. `kep1`) | `instances[].id` |
 | `{signalPath}` | the node's bare identifier **sanitized to one channel token** (`/ \ + #` and control chars → `_`) | runtime |
 
@@ -111,8 +111,8 @@ declared once via `hierarchy` + `identity`:
 
 | Signal (node id) | Published `data` topic | `identity.path` on the envelope |
 |------------------|------------------------|---------------------------------|
-| `ns=2;s=Channel1.Device1.Flow` | `ecv1/edge-gw-01/OpcUaAdapter/kep1/data/Channel1.Device1.Flow` | `plant1/assembly/5/edge-gw-01` |
-| `ns=2;s=Line/5/Alarm` | `ecv1/edge-gw-01/OpcUaAdapter/kep1/data/Line_5_Alarm` (`/` sanitized to `_`) | `plant1/assembly/5/edge-gw-01` |
+| `ns=2;s=Channel1.Device1.Flow` | `ecv1/edge-gw-01/opcua-adapter/kep1/data/Channel1.Device1.Flow` | `plant1/assembly/5/edge-gw-01` |
+| `ns=2;s=Line/5/Alarm` | `ecv1/edge-gw-01/opcua-adapter/kep1/data/Line_5_Alarm` (`/` sanitized to `_`) | `plant1/assembly/5/edge-gw-01` |
 
 > The **stable** `signal.id` in the body (the full `ns=2;s=…` form) is what consumers key on; the
 > `{signalPath}` is only the routing address. A fleet consumer subscribes **one wildcard**,
@@ -160,7 +160,7 @@ here) or as a separate file passed positionally as `--transport MQTT ./messaging
         "subscriptions": [
           {
             "id": "all",
-            "include": [ { "namespaceUri": "urn:ggcommons:sim", "match": "Sine.*" } ]
+            "include": [ { "namespaceUri": "urn:edgecommons:sim", "match": "Sine.*" } ]
           }
         ]
       }
@@ -423,10 +423,10 @@ What this achieves, signal by signal:
 
 | Signal | Group / matcher | Outcome |
 |-----|-----------------|---------|
-| `Channel1.Device1.Flow` | `process` ▸ `^Channel1\..*` | sampled every 100 ms, ±0.5-unit deadband, delivered every 200 ms, batched to `ecv1/{device}/OpcUaAdapter/kep1/data/Channel1.Device1.Flow` |
+| `Channel1.Device1.Flow` | `process` ▸ `^Channel1\..*` | sampled every 100 ms, ±0.5-unit deadband, delivered every 200 ms, batched to `ecv1/{device}/opcua-adapter/kep1/data/Channel1.Device1.Flow` |
 | `Channel2.Meter1.kWh` | `process` ▸ `^Channel2\..*` | sampled every 1 s, 1 %-of-range deadband (slow meter), delivered every 200 ms |
 | `Channel1.Device1.Diagnostics.Successful Reads` | `exclude` ▸ `.*\.Diagnostics\..*` | **dropped** — matched by `process` include but pruned by exclude |
-| `Channel1.Device1.Alarms.HiHi` | `alarms` ▸ `.*\.Alarms\..*` | captured at server-fastest sampling, published to `ecv1/{device}/OpcUaAdapter/kep1/data/Channel1.Device1.Alarms.HiHi` |
+| `Channel1.Device1.Alarms.HiHi` | `alarms` ▸ `.*\.Alarms\..*` | captured at server-fastest sampling, published to `ecv1/{device}/opcua-adapter/kep1/data/Channel1.Device1.Alarms.HiHi` |
 | `_System._Time_Second` | `diagnostics` ▸ `^_System\..*` | delivered every 10 s, tiny queue — near-zero cost |
 
 > **Why the `process` group also excludes `.*\.Alarms\..*`:** a node can match more than one
@@ -542,7 +542,7 @@ separate consumer of the local topics:
 - **High-rate, high-volume** telemetry for analytics or a historian — the library's streaming
   subsystem, `gg.streams()`, which batches and compresses into a durable on-disk buffer that drains to
   Kinesis or Kafka and survives WAN outages. See the [Streaming guide](/guides/streaming/) and the
-  [streaming reference](/reference/streaming/) for its configuration; it is a `ggcommons` subsystem you
+  [streaming reference](/reference/streaming/) for its configuration; it is a `edgecommons` subsystem you
   run in a forwarding component, not an `opcua-adapter` option.
 
 ---
@@ -550,7 +550,7 @@ separate consumer of the local topics:
 ## 6. Kubernetes (ConfigMap)
 
 On `--platform KUBERNETES` the config source defaults to `CONFIGMAP`: the whole ConfigMap is mounted
-as a **directory** (typically `/etc/ggcommons`) so the adapter watches the kubelet `..data` swap and
+as a **directory** (typically `/etc/edgecommons`) so the adapter watches the kubelet `..data` swap and
 **hot-reloads in place** on `kubectl apply` — no restart. The broker config lives in the same
 ConfigMap (in-cluster broker via Service DNS); identity comes from the Downward API, so usually **no
 CLI args** are needed.
@@ -596,11 +596,11 @@ data:
 | `component` section identical to other platforms | The component **name** (`{ComponentName}`) is fixed by the adapter binary, so it does **not** appear in the config — only the `component` *object* (global/instances) does. The same `component`/`connection`/`subscriptions` shape works verbatim on HOST, GREENGRASS, and KUBERNETES. |
 | `messaging.local.host` = a Service DNS name | The in-cluster MQTT broker reached via Kubernetes Service DNS (`emqx.default.svc.cluster.local`). Point it at your broker Service. |
 | `metricEmission.target: "prometheus"` | Exposes `southbound_health` on the pod's metrics port (default `:9090`) for Prometheus scraping instead of publishing it — the idiomatic k8s path. |
-| No `-t/--thing` arg | Identity resolves from the Downward API (`GGCOMMONS_THING_NAME` ▸ `POD_NAME`). The Deployment also gates traffic on the HTTP health probes (`/startupz`, `/livez`, `/readyz`) the library serves on `:8081`. |
+| No `-t/--thing` arg | Identity resolves from the Downward API (`EDGECOMMONS_THING_NAME` ▸ `POD_NAME`). The Deployment also gates traffic on the HTTP health probes (`/startupz`, `/livez`, `/readyz`) the library serves on `:8081`. |
 | `connection` / `subscriptions` | Same OPC UA semantics as every other platform — only the config **source** (ConfigMap) and the metrics/identity wiring differ. Editing the ConfigMap and re-applying changes the live subscription set on the fly. |
 
 > Deploy with `kubectl apply -f k8s/`; the companion `deployment.yaml` mounts this ConfigMap at
-> `/etc/ggcommons` (read-only, whole volume), sets `workingDir: /tmp` (the Java MQTT client needs a
+> `/etc/edgecommons` (read-only, whole volume), sets `workingDir: /tmp` (the Java MQTT client needs a
 > writable cwd), and wires the health (`8081`) and metrics (`9090`) ports.
 
 ---
@@ -620,7 +620,7 @@ listing several `instances` — they share only the process. Mix security and ti
       "publish": { "batchMs": 0 },
       "subscriptions": [
         { "id": "sines",
-          "include": [ { "namespaceUri": "urn:ggcommons:sim", "match": "Sine.*" } ] }
+          "include": [ { "namespaceUri": "urn:edgecommons:sim", "match": "Sine.*" } ] }
       ]
     },
     {

@@ -2,7 +2,7 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>com.mbreissi.opcua.opcuaadapter</groupId>
+  <groupId>com.mbreissi.edgecommons.opcua</groupId>
   <artifactId>OpcUaAdapter</artifactId>
   <packaging>jar</packaging>
   <version>1.0.0</version>
@@ -17,14 +17,11 @@
     <mavenPluginVersion>3.5.1</mavenPluginVersion>
     <!-- LOCAL DEV OVERRIDE SEAM (the Maven analog of the bridge's gitignored .cargo/config.toml
          `[patch]`): Maven resolves a dependency by coordinate, so there is no "path dependency" —
-         the local-dev equivalent is `mvn install` on the SIBLING checkout (../ggcommons/libs/java)
+         the local-dev equivalent is `mvn install` on the SIBLING checkout (../core/libs/java)
          into your local ~/.m2, then pointing this property at whatever version that installs as
-         (`mvn -Dggcommons.version=<sibling-version> package`). Maven's local-repo-first resolution
-         means GitHub Packages is never contacted for a version already in ~/.m2. The UNS rework
-         ships on the sibling's `feat/unified-namespace` branch which is (still) version 0.1.1 — the
-         SAME string as the old published artifact, so the local ~/.m2 install shadows the published
-         one for local builds. Bump this to the released pin once the UNS library publishes. -->
-    <ggcommons.version>0.2.0</ggcommons.version>
+         (`mvn -Dedgecommons.version=<sibling-version> package`). Maven's local-repo-first resolution
+         means GitHub Packages is never contacted for a version already in ~/.m2. -->
+    <edgecommons.version>0.2.0</edgecommons.version>
   </properties>
 
   <dependencies>
@@ -54,9 +51,9 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>com.mbreissi</groupId>
-      <artifactId>ggcommons</artifactId>
-      <version>${ggcommons.version}</version>
+      <groupId>com.mbreissi.edgecommons</groupId>
+      <artifactId>edgecommons</artifactId>
+      <version>${edgecommons.version}</version>
     </dependency>
     <dependency>
       <groupId>com.google.code.gson</groupId>
@@ -89,7 +86,7 @@
               <createDependencyReducedPom>false</createDependencyReducedPom>
               <transformers>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                  <mainClass>com.mbreissi.opcua.opcuaadapter.OpcUaAdapter</mainClass>
+                  <mainClass>com.mbreissi.edgecommons.opcua.OpcUaAdapter</mainClass>
                 </transformer>
               </transformers>
               <filters>
@@ -125,12 +122,12 @@
 
 
   <repositories>
-    <!-- Resolve com.mbreissi:ggcommons from GitHub Packages. Auth via ~/.m2/settings.xml:
+    <!-- Resolve com.mbreissi.edgecommons:edgecommons from GitHub Packages. Auth via ~/.m2/settings.xml:
          a <server> with <id>github</id> and a GitHub token (read:packages). For a local
          monorepo build use `mvn install` on libs/java instead (then ~/.m2 satisfies it). -->
     <repository>
       <id>github</id>
-      <url>https://maven.pkg.github.com/edgecommons/ggcommons</url>
+      <url>https://maven.pkg.github.com/edgecommons/edgecommons</url>
     </repository>
   </repositories>
 

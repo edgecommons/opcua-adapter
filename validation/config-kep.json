@@ -1,33 +1,68 @@
 {
-  "tags": { "appId": "smoke", "site": "lab", "shop": "s1", "line": "l1" },
-  "logging": { "level": "INFO" },
+  "tags": {
+    "appId": "smoke",
+    "site": "lab",
+    "shop": "s1",
+    "line": "l1"
+  },
+  "logging": {
+    "level": "INFO"
+  },
   "metricEmission": {
     "target": "messaging",
-    "targetConfig": { "topic": "metrics/{ThingName}/{ComponentName}" }
+    "targetConfig": {
+      "topic": "metrics/{ThingName}/{ComponentName}"
+    }
   },
   "component": {
     "global": {
-      "defaults": { "publishIntervalMs": 1000, "samplingRateMs": 500, "queueSize": 10 },
-      "healthThresholds": { "staleSignalSecs": 30 }
+      "defaults": {
+        "publishIntervalMs": 1000,
+        "samplingRateMs": 500,
+        "queueSize": 10
+      },
+      "healthThresholds": {
+        "staleSignalSecs": 30
+      }
     },
     "instances": [
       {
         "id": "kep1",
-        "connection": { "endpoint": "opc.tcp://192.168.1.180:49320", "securityPolicy": "None" },
-        "publish": { "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}", "batchMs": 1000 },
-        "write": { "enabled": true, "topic": "southbound/{ComponentName}/{InstanceId}/write" },
-        "read": { "topic": "southbound/{ComponentName}/{InstanceId}/read" },
+        "connection": {
+          "endpoint": "opc.tcp://192.168.1.180:49320",
+          "securityPolicy": "None"
+        },
+        "publish": {
+          "topic": "southbound/{site}/{ComponentName}/{InstanceId}/{signalId}",
+          "batchMs": 1000
+        },
+        "write": {
+          "enabled": true,
+          "topic": "southbound/{ComponentName}/{InstanceId}/write"
+        },
+        "read": {
+          "topic": "southbound/{ComponentName}/{InstanceId}/read"
+        },
         "subscriptions": [
           {
             "id": "system-clock",
             "include": [
-              { "namespaceUri": "Kepware Server", "match": "^_System\\._Time.*", "samplingRateMs": 500, "queueSize": 10,
-                "deadband": { "type": "None", "value": 0.0 } }
+              {
+                "namespaceUri": "Kepware Server",
+                "match": "^_System\\._Time.*",
+                "samplingRateMs": 500,
+                "queueSize": 10,
+                "deadband": {
+                  "type": "None",
+                  "value": 0.0
+                }
+              }
             ],
             "exclude": []
           }
         ]
       }
-    ]
+    ],
+    "token": "opcua-adapter"
   }
 }

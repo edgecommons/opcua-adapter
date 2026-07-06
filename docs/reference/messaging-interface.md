@@ -5,7 +5,7 @@ command-line flags. For the data-plane / control-plane model and the reasoning b
 see [explanation.md](../explanation.md); for client recipes, see the
 [how-to guides](../how-to-guides.md).
 
-> **Unified Namespace (UNS).** This adapter uses the ggcommons UNS core. All topics follow
+> **Unified Namespace (UNS).** This adapter uses the edgecommons UNS core. All topics follow
 > the grammar `ecv1/{device}/{component}/{instance}/{class}[/{channel…}]`, minted by the library's
 > topic builder (`gg.instance(id).uns()`) — never hand-assembled. The site hierarchy rides the
 > top-level envelope **`identity`** element (not the topic, not `tags`).
@@ -20,7 +20,7 @@ see [explanation.md](../explanation.md); for client recipes, see the
 
 ## Envelope
 
-All messages use the GGCommons JSON envelope, `{header, identity, tags, body}`:
+All messages use the EdgeCommons JSON envelope, `{header, identity, tags, body}`:
 
 ```jsonc
 {
@@ -36,7 +36,7 @@ All messages use the GGCommons JSON envelope, `{header, identity, tags, body}`:
     "hier": [ { "level": "site", "value": "site1" }, { "level": "shop", "value": "shop1" },
               { "level": "line", "value": "line1" }, { "level": "device", "value": "gw-01" } ],
     "path": "site1/shop1/line1/gw-01",
-    "component": "OpcUaAdapter",
+    "component": "opcua-adapter",
     "instance": "kep1"
   },
   "tags": { "appId": "adapter", … },  // arbitrary business metadata only — no `thing` key
@@ -51,7 +51,7 @@ requires parsing the body *or* the topic.
 
 **Inbound leniency.** A command request's **verb** is the `cmd` topic's channel (after `cmd/`) and the
 envelope's `header.name` must equal it (the library inbox enforces this); the request `body` is the
-verb's argument object. A GGCommons client's `request()` API sets `header.name`/`reply_to`/
+verb's argument object. A EdgeCommons client's `request()` API sets `header.name`/`reply_to`/
 `correlation_id` automatically.
 
 ## Topics (UNS classes)

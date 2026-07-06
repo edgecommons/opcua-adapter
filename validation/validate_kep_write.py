@@ -88,7 +88,7 @@ def main():
     elif isinstance(cur, (int, float)):
         newv = (cur or 0) + 1
     else:
-        newv = "ggcommons-" + datetime.now(timezone.utc).strftime("%H%M%S")
+        newv = "edgecommons-" + datetime.now(timezone.utc).strftime("%H%M%S")
     print(f"[2] writing {SIGNAL} = {newv!r}", flush=True)
     c.publish(write_topic, env("WriteSignals", {"writes": [{"namespaceUri": NS, "signalId": SIGNAL, "value": newv}]}))
     time.sleep(2)

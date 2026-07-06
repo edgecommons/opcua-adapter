@@ -1,5 +1,5 @@
 """Validate one adapter bridging TWO OPC UA servers at once (config-kep-multi.json):
-  instance 'sim1' -> asyncua sim (opc.tcp://localhost:4840, ns urn:ggcommons:sim)
+  instance 'sim1' -> asyncua sim (opc.tcp://localhost:4840, ns urn:edgecommons:sim)
   instance 'kep1' -> KEPServerEX (opc.tcp://192.168.1.180:49320, ns "Kepware Server")
 
 Checks both stream concurrently with the correct per-instance identity (device.instance / endpoint /
@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
 
 BROKER_HOST, BROKER_PORT = "localhost", 1883
-SIM_NS = "urn:ggcommons:sim"
+SIM_NS = "urn:edgecommons:sim"
 KEP_NS = "Kepware Server"
 
 msgs = []
@@ -120,9 +120,9 @@ def main():
         sids = {e["signal"]["address"].get("nodeId"): e.get("quality") for e in (rs.get("body", {}).get("reads", []) if rs else [])}
         check("sim1 read routes to sim", sids.get("Counter") == "GOOD", f"{sids}")
 
-        rk = request(c, f"southbound/{comp}/kep1/read", {"signals": [{"namespaceUri": KEP_NS, "signalId": "GGCommonsTest.Device1.Int32"}]})
+        rk = request(c, f"southbound/{comp}/kep1/read", {"signals": [{"namespaceUri": KEP_NS, "signalId": "EdgeCommonsTest.Device1.Int32"}]})
         kids = {e["signal"]["address"].get("nodeId"): e.get("quality") for e in (rk.get("body", {}).get("reads", []) if rk else [])}
-        check("kep1 read routes to kep", kids.get("GGCommonsTest.Device1.Int32") == "GOOD", f"{kids}")
+        check("kep1 read routes to kep", kids.get("EdgeCommonsTest.Device1.Int32") == "GOOD", f"{kids}")
     else:
         check("component derivable", False, "no sim1 topic seen")
 

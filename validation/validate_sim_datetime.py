@@ -1,7 +1,7 @@
 """Validate DateTime read + write round-trip through the adapter against the asyncua sim.
 
 KEPServerEX's Simulator cannot host a writable Date signal, so the DateTime *write* path is verified
-here against the sim's writable DateTimeRW node (ns=urn:ggcommons:sim). Run:
+here against the sim's writable DateTimeRW node (ns=urn:edgecommons:sim). Run:
 
     python validation/opcua_sim_server.py &
     java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
 
 BROKER_HOST, BROKER_PORT = "localhost", 1883
-NS = "urn:ggcommons:sim"
+NS = "urn:edgecommons:sim"
 SIGNAL = "DateTimeRW"
 NEW = "2030-06-15T08:09:10+00:00"
 

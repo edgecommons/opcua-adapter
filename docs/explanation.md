@@ -12,7 +12,7 @@ care about, and re-publishes their values as structured messages — and in the 
 lets a client read or write signals on demand without knowing anything about OPC UA.
 
 It is deliberately thin. All the cross-cutting concerns an edge component needs — configuration,
-messaging transport, metrics, credentials, lifecycle — come from the `ggcommons` library, so the
+messaging transport, metrics, credentials, lifecycle — come from the `edgecommons` library, so the
 adapter contains only OPC UA logic. That logic is built on **Eclipse Milo**, the mature OPC UA stack
 for the JVM.
 
@@ -187,7 +187,7 @@ certificate, and the server must trust the adapter's. Both sides present an *app
 certificate*, and the channel signs and (optionally) encrypts every message.
 
 The adapter's identity — its certificate and private key — comes from a configurable source: the
-encrypted `ggcommons` **credentials vault**, plain **files**, or a **PKCS#11 token** where the private
+encrypted `edgecommons` **credentials vault**, plain **files**, or a **PKCS#11 token** where the private
 key never leaves the hardware. The vault is the recommended source because the key is encrypted at
 rest and can be delivered through the same secret-management path as the component's other secrets.
 

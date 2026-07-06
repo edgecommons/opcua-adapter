@@ -86,7 +86,7 @@ ns=2;s=Sine1                                  =     0.7071  [GOOD]
 ns=2;s=Sine2                                  =     0.7071  [GOOD]
 ```
 That is the **data plane**: each change becomes a `SouthboundSignalUpdate` on the UNS `data` class
-(`ecv1/tutorial-thing/OpcUaAdapter/sim1/data/{signalPath}`). Leave this running to observe the next
+(`ecv1/tutorial-thing/opcua-adapter/sim1/data/{signalPath}`). Leave this running to observe the next
 steps. (Stop it with Ctrl-C when done.)
 
 ## Step 6 — Read a signal on demand
@@ -104,7 +104,7 @@ c.on_message = lambda c,u,m: got.append(json.loads(m.payload))
 c.connect("localhost", 1883); c.loop_start()
 req = {"header": {"name": "sb/read", "version": "1.0", "reply_to": "app/reply/1", "correlation_id": "1"},
        "body": {"instance": "sim1", "signals": [{"ns": 2, "signalId": "Counter"}, {"ns": 2, "signalId": "Setpoint"}]}}
-c.publish("ecv1/tutorial-thing/OpcUaAdapter/main/cmd/sb/read", json.dumps(req)); time.sleep(2)
+c.publish("ecv1/tutorial-thing/opcua-adapter/main/cmd/sb/read", json.dumps(req)); time.sleep(2)
 print(json.dumps(got[0]["body"], indent=2))
 PY
 ```
@@ -122,7 +122,7 @@ import paho.mqtt.client as mqtt, json
 c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2); c.connect("localhost", 1883)
 req = {"header": {"name": "sb/write", "version": "1.0"},
        "body": {"instance": "sim1", "writes": [{"ns": 2, "signalId": "Setpoint", "value": 42.5}]}}
-c.publish("ecv1/tutorial-thing/OpcUaAdapter/main/cmd/sb/write", json.dumps(req)); c.loop()
+c.publish("ecv1/tutorial-thing/opcua-adapter/main/cmd/sb/write", json.dumps(req)); c.loop()
 PY
 ```
 Re-run Step 6 and you will see `Setpoint` is now `42.5` — the value travelled bus → adapter → OPC UA

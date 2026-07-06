@@ -110,7 +110,7 @@ python validation/kep_server_cert.py opc.tcp://<host>:49320 validation/certs/kep
 java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
      validation/messaging-local.json -c FILE validation/config-kep-secure.json -t kep-thing &
 # first attempt fails Bad_SecurityChecksFailed: in KEP's OPC UA Config Mgr -> Trusted Clients,
-# trust "GGCommons OPC UA Adapter". The adapter retries every 5s and connects.
+# trust "EdgeCommons OPC UA Adapter". The adapter retries every 5s and connects.
 python validation/validate_kep.py                                # ALL PASS over the encrypted channel
 ```
 
@@ -127,7 +127,7 @@ changing values from simulator functions, and the adapter's features. It needs a
 typed tags, created on the server via the KEP **Configuration REST API** (`kep_setup.py`).
 
 ```bash
-# 1. create the GGCommonsTest channel/device/tags (Config-API account needs add+edit permission)
+# 1. create the EdgeCommonsTest channel/device/tags (Config-API account needs add+edit permission)
 KEP_API_USER=Administrator KEP_API_PASS=*** KEP_API_HOST=<host>:57512 python validation/kep_setup.py
 # 2. copy the template and set connection.user to a read/write KEP UA account
 cp validation/config-kep-suite.example.json validation/config-kep-suite.json   # edit connection.user

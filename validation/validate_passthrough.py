@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
 
 BROKER_HOST, BROKER_PORT = "localhost", 1883
-NS = "urn:ggcommons:sim"
+NS = "urn:edgecommons:sim"
 NODES = ["ByteStringNode", "GuidNode", "NodeIdNode", "LocalizedTextNode",
          "QualifiedNameNode", "StatusCodeNode", "XmlElementNode"]
 

@@ -1,4 +1,4 @@
-"""Create the GGCommonsTest channel/device/tags on KEPServerEX via the Configuration REST API.
+"""Create the EdgeCommonsTest channel/device/tags on KEPServerEX via the Configuration REST API.
 
 Idempotent: deletes the channel first, then recreates it. Credentials come from the environment so
 no secret is committed:
@@ -13,7 +13,7 @@ Creates (driver=Simulator, 8-Bit device so Byte/Char are available):
   - 12 read/write register tags, one per adapter-supported scalar type (round-trip write tests)
   - 4 read-only simulator-function tags with changing values (subscribe tests)
 
-OPC UA exposes each as ns=2 ("Kepware Server"), identifier "GGCommonsTest.Device1.<name>".
+OPC UA exposes each as ns=2 ("Kepware Server"), identifier "EdgeCommonsTest.Device1.<name>".
 """
 import base64
 import json
@@ -32,7 +32,7 @@ CTX = ssl.create_default_context()
 CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
-CHANNEL = "GGCommonsTest"
+CHANNEL = "EdgeCommonsTest"
 DEVICE = "Device1"
 
 # (name, address, TAG_DATA_TYPE)  -- read/write HOLDING registers (8-Bit device K-register map).
