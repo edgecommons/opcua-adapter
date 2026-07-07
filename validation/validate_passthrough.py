@@ -1,7 +1,7 @@
 """Empirically confirm the adapter's PASS-THROUGH type behavior against asyncua:
 read renders the value as a JSON string; write is rejected (skipped), leaving the value unchanged.
 
-Covers OPC UA types the contract does not model: ByteString, Guid, NodeId, LocalizedText,
+Covers OPC UA types that remain read-only string pass-through: Guid, NodeId, LocalizedText,
 QualifiedName, StatusCode, XmlElement (all writable in the sim, so a skipped write is observable).
 
     python validation/opcua_sim_server.py &
@@ -19,7 +19,7 @@ import paho.mqtt.client as mqtt
 
 BROKER_HOST, BROKER_PORT = "localhost", 1883
 NS = "urn:edgecommons:sim"
-NODES = ["ByteStringNode", "GuidNode", "NodeIdNode", "LocalizedTextNode",
+NODES = ["GuidNode", "NodeIdNode", "LocalizedTextNode",
          "QualifiedNameNode", "StatusCodeNode", "XmlElementNode"]
 
 msgs = []

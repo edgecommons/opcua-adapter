@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.mbreissi.edgecommons.facades.Quality;
 import com.mbreissi.edgecommons.facades.SignalUpdate;
+import com.mbreissi.edgecommons.messaging.Message;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.milo.opcua.stack.core.NamespaceTable;
@@ -62,8 +63,12 @@ public final class ValueCodec {
         StatusCode sc = value.getStatusCode();
         sample.addProperty("quality", normalizeQuality(sc).wire());
         sample.addProperty("qualityRaw", sc != null ? sc.toString() : "null");
-        sample.addProperty("sourceTs", value.getSourceTime() != null ? value.getSourceTime().getJavaInstant().toString() : null);
-        sample.addProperty("serverTs", value.getServerTime() != null ? value.getServerTime().getJavaInstant().toString() : null);
+        if (value.getSourceTime() != null) {
+            sample.addProperty("sourceTs", value.getSourceTime().getJavaInstant().toString());
+        }
+        if (value.getServerTime() != null) {
+            sample.addProperty("serverTs", value.getServerTime().getJavaInstant().toString());
+        }
         return sample;
     }
 
@@ -76,13 +81,12 @@ public final class ValueCodec {
      */
     public static SignalUpdate.Sample toSampleParts(DataValue value) {
         Object v = value.getValue() != null ? value.getValue().getValue() : null;
-        JsonElement jsonValue = encodeValue(v);
         StatusCode sc = value.getStatusCode();
         Quality quality = normalizeQuality(sc);
         String qualityRaw = sc != null ? sc.toString() : null;
         String sourceTs = value.getSourceTime() != null ? value.getSourceTime().getJavaInstant().toString() : null;
         String serverTs = value.getServerTime() != null ? value.getServerTime().getJavaInstant().toString() : null;
-        return new SignalUpdate.Sample(jsonValue, quality, qualityRaw, sourceTs, serverTs);
+        return new SignalUpdate.Sample(sampleValue(v), quality, qualityRaw, sourceTs, serverTs);
     }
 
     /**
@@ -93,6 +97,9 @@ public final class ValueCodec {
     private static JsonElement encodeValue(Object v) {
         if (v == null) {
             return JsonNull.INSTANCE;
+        }
+        if (v instanceof ByteString bytes) {
+            return encodeByteString(bytes);
         }
         if (v instanceof Number) {
             return new JsonPrimitive((Number) v);
@@ -112,6 +119,20 @@ public final class ValueCodec {
             return arr;
         }
         return new JsonPrimitive(v.toString());
+    }
+
+    private static Object sampleValue(Object v) {
+        if (v instanceof ByteString bytes) {
+            return bytes.isNull() ? JsonNull.INSTANCE : bytes.bytesOrEmpty().clone();
+        }
+        return encodeValue(v);
+    }
+
+    private static JsonElement encodeByteString(ByteString bytes) {
+        if (bytes.isNull()) {
+            return JsonNull.INSTANCE;
+        }
+        return Message.binaryBodyMarker(bytes.bytesOrEmpty().clone());
     }
 
     /**
