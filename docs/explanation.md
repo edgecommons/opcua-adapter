@@ -45,7 +45,7 @@ each with one responsibility, assembled by a thin coordinator (`OpcUaDevice`):
 | `SignalUpdatePublisher` | Turn value changes into `SouthboundSignalUpdate` messages, batching per signal. |
 | `CommandService` | Serve the command surface: writes (with optional ack), on-demand reads (list and/or regex), and status/subscriptions/nodes queries. |
 | `ValueCodec` | Convert between OPC UA values and the JSON contract (types, quality, timestamps). |
-| `HealthMetrics` | Define and emit the `southbound_health` metric. |
+| `HealthMetrics` / `OpcUaOperationalMetrics` | Define and emit connection/error plus command, subscription, browse, and connection metrics. |
 
 You do not interact with these classes directly, but knowing the shape helps when reading logs — each
 logs under its own name with the instance id as a prefix (`[kep1]`), so a connection problem and a
@@ -74,12 +74,13 @@ updates flowing out to the bus on the UNS **`data`** class
 
 The **control plane** carries management. It is low-volume and about the *adapter itself* rather than
 the process: "are you connected?" (`sb/status`), "what are you subscribed to?" (`sb/subscriptions`),
-"what's available on the server?" (`sb/browse`), the operator `evt` alarms, and the `southbound_health`
-metric. A monitoring system lives here; a process historian lives on the data plane.
+"what's available on the server?" (`sb/browse`), the operator `evt` alarms, and the
+`southbound_health` / OPC UA operational metrics. A monitoring system lives here; a process historian
+lives on the data plane.
 
 The split tells an integrator what to build. A consumer of telemetry subscribes one UNS wildcard,
 `ecv1/+/+/+/data/#`, and ignores the rest. An operations dashboard issues the `cmd/sb/*` queries,
-watches `ecv1/+/+/+/evt/#`, and reads the health metric. The exact topics and payloads are in the
+watches `ecv1/+/+/+/evt/#`, and reads the health/operational metrics. The exact topics and payloads are in the
 [messaging reference](reference/messaging-interface.md).
 
 ## The timing pipeline (the thing most worth understanding)

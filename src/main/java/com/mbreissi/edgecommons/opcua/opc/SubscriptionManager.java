@@ -69,6 +69,7 @@ public class SubscriptionManager {
                 subscriptions.put(subscription, spec);
             }
         }
+        updateSubscriptionShape();
     }
 
     private OpcUaSubscription create(SubscriptionSpec spec) {
@@ -97,7 +98,7 @@ public class SubscriptionManager {
                             deadband.getValue()));
                 }
                 item.setDataValueListener((it, value) -> {
-                    counters.incrementReadMetrics();
+                    counters.recordSubscribedRead();
                     publisher.offer(node, signalSpec, value);
                 });
                 items.add(item);
@@ -120,10 +121,16 @@ public class SubscriptionManager {
         if (spec == null) {
             return;
         }
+        counters.recordSubscriptionRecreate();
         OpcUaSubscription replacement = create(spec);
         if (replacement != null) {
             subscriptions.put(replacement, spec);
         }
+        updateSubscriptionShape();
+    }
+
+    private void updateSubscriptionShape() {
+        counters.setSubscriptionShape(subscriptions.size(), resolvedSignals.size());
     }
 
     private Map<UaVariableNode, SignalSpec> filter(SubscriptionSpec spec) {

@@ -29,8 +29,13 @@ Configuration hot-reloads where the source supports it.
 | `messaging` | HOST/KUBERNETES | MQTT broker connection (or supply via `--transport MQTT <file>`). On GREENGRASS the transport is IPC. |
 | `topic.includeRoot` | optional | `true` inserts the first hierarchy value (`site`) after the `ecv1` root in built topics (multi-site broker). Default `false` (rootless). |
 | `credentials` | only for `vault` cert source | Enables the encrypted vault used by `clientCertificate.source: "vault"`. |
-| `metricEmission` | optional | Routes the `southbound_health` metric (`target`: `log`/`messaging`/`cloudwatch`/`prometheus`). The `metric` topic is UNS-minted — do **not** set a `targetConfig.topic` (the schema rejects it); use `targetConfig.destination` (`local`/`iotcore`) instead. |
+| `metricEmission` | optional | Routes `southbound_health` plus `OpcUaCommand`, `OpcUaSubscription`, `OpcUaBrowse`, and `OpcUaConnection` metrics (`target`: `log`/`messaging`/`cloudwatch`/`prometheus`). The `metric` topic is UNS-minted — do **not** set a `targetConfig.topic` (the schema rejects it); use `targetConfig.destination` (`local`/`iotcore`) instead. |
 | `logging`, `heartbeat` | optional | Standard edgecommons sections. |
+
+The OPC UA operational metric families use `instance` as their adapter-owned dimension; operation and
+window semantics are encoded in measure names such as `ReadRequestInterval`,
+`SubscribedReadTotal`, and `SessionConnected`. That keeps CloudWatch dimensions bounded and avoids
+endpoint URLs, node ids, signal names, raw errors, or security policy values as dimensions.
 
 ### `hierarchy` / `identity` (UNS)
 
@@ -227,7 +232,8 @@ setting.
 These keys are ignored (documented to prevent misplaced trust):
 
 - `component.global.healthThresholds.staleSignalSecs` and a `staleSignals` health measure — the
-  `southbound_health` metric emits `connectionState`, `readErrors`, and `writeErrors`.
+  `southbound_health` metric emits `connectionState`, `readErrors`, and `writeErrors`; OPC UA
+  command/subscription/browse/connection counters are emitted as separate operational metric families.
 - `connection.trust.autoTrustServerCert` — there is no auto-trust; trust the server certificate
   explicitly.
 - a signal matcher's `topic` key — addressing is UNS-minted, so per-signal topic overrides are not

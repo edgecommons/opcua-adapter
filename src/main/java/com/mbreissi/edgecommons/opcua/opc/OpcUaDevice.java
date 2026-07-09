@@ -23,8 +23,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@link OpcUaConnection} (connect), {@link AddressSpaceBrowser} (browse),
  * {@link SubscriptionManager} (subscribe), {@link SignalUpdatePublisher} (publishes onto the UNS
  * {@code data} class via the {@code data()} facade), {@link CommandService} (the {@code sb/*} verbs),
- * {@link HealthMetrics} (health metric), and the instance-bound {@link EventsFacade} (UNS {@code evt}
- * alarms, DESIGN-class-facades §2.2). One per {@code component.instances[]} entry.
+ * {@link HealthMetrics} / {@link OpcUaOperationalMetrics} (metrics), and the instance-bound
+ * {@link EventsFacade} (UNS {@code evt} alarms, DESIGN-class-facades §2.2). One per
+ * {@code component.instances[]} entry.
  *
  * <p>Publishing and the command/event surface are all addressed through the per-instance UNS handle
  * ({@link EdgeCommonsInstance}): {@code data()}/{@code events()} mint their topics and stamp every envelope with
@@ -55,10 +56,12 @@ public class OpcUaDevice {
         this.events = instance.events();
 
         HealthMetrics health = new HealthMetrics(metrics, configManager, config.getId(), counters);
+        OpcUaOperationalMetrics operationalMetrics = new OpcUaOperationalMetrics(metrics, configManager, config.getId(), counters);
+        health.emit(false);
 
         // 1. Connect (blocks + retries).
-        connection = new OpcUaConnection(config, credentials);
-        OpcUaClient client = connection.connect();
+        connection = new OpcUaConnection(config, credentials, counters);
+        OpcUaClient client = connection.connect(() -> health.emit(false));
         lastConnected = true;
         health.emit(true);
 
@@ -85,6 +88,7 @@ public class OpcUaDevice {
                 // OpcUaConnection.connect()) — no active probe needed.
                 boolean now = connection.isConnected();
                 health.emit(now);
+                operationalMetrics.emit(now);
                 if (now != lastConnected) {
                     lastConnected = now;
                     emitConnectionEvent(now);

@@ -137,8 +137,15 @@ public class CommandService {
      * carries its outgoing hierarchical {@code refs}.
      */
     public JsonObject browse(Message request) throws CommandException {
-        JsonObject reqBody = asJsonObject(request);
-        return browseHierarchical(reqBody);
+        counters.recordBrowseRequest();
+        try {
+            JsonObject result = browseHierarchical(asJsonObject(request));
+            counters.recordBrowseResult(result.get("refCount").getAsLong(), result.get("truncated").getAsBoolean());
+            return result;
+        } catch (CommandException | RuntimeException e) {
+            counters.recordBrowseFailure();
+            throw e;
+        }
     }
 
     private JsonObject browseHierarchical(JsonObject reqBody) throws CommandException {
@@ -377,81 +384,87 @@ public class CommandService {
      * A malformed matcher throws {@link #ERR_BAD_MATCHER}.
      */
     public JsonObject read(Message request) throws Exception {
-        JsonObject payload = asJsonObject(request);
-        JsonArray signals = (payload != null && payload.has("signals")) ? payload.getAsJsonArray("signals") : new JsonArray();
+        try {
+            JsonObject payload = asJsonObject(request);
+            JsonArray signals = (payload != null && payload.has("signals")) ? payload.getAsJsonArray("signals") : new JsonArray();
 
-        List<NodeId> explicit = new ArrayList<>();
-        for (JsonElement el : signals) {
-            try {
-                explicit.add(nodeIdFrom(el.getAsJsonObject()));
-            } catch (Exception e) {
-                LOGGER.warn("[{}] read signal skipped: {}", serverConfig.getId(), e.getMessage());
-            }
-        }
-
-        List<NodeId> includeMatched = new ArrayList<>();
-        if (payload != null && payload.has("include")) {
-            List<SignalSpec> includeSpecs;
-            List<SignalSpec> excludeSpecs;
-            try {
-                includeSpecs = specsFromJson(payload.getAsJsonArray("include"));
-                excludeSpecs = payload.has("exclude")
-                        ? specsFromJson(payload.getAsJsonArray("exclude"))
-                        : List.of();
-                // Compile the caller-supplied regexes up front so a malformed pattern (or a non-object
-                // matcher entry) becomes a coded error reply instead of escaping to a HANDLER_ERROR.
-                includeSpecs.forEach(SignalSpec::pattern);
-                excludeSpecs.forEach(SignalSpec::pattern);
-            } catch (Exception e) {
-                LOGGER.warn("[{}] read include/exclude rejected: {}", serverConfig.getId(), e.toString());
-                throw new CommandException(ERR_BAD_MATCHER, "invalid include/exclude: " + e.getMessage());
-            }
-            NamespaceTable table = client.getNamespaceTable();
-            Map<SignalSpec, Integer> includeNs = new HashMap<>();
-            includeSpecs.forEach(spec -> includeNs.put(spec, SignalMatching.resolveNamespace(spec, table)));
-            Map<SignalSpec, Integer> excludeNs = new HashMap<>();
-            excludeSpecs.forEach(spec -> excludeNs.put(spec, SignalMatching.resolveNamespace(spec, table)));
-
-            for (UaVariableNode node : allNodes.values()) {
-                String idStr = node.getNodeId().getIdentifier().toString();
-                String browseName = node.getBrowseName() != null && node.getBrowseName().getName() != null
-                        ? node.getBrowseName().getName() : "";
-                String displayName = node.getDisplayName() != null && node.getDisplayName().getText() != null
-                        ? node.getDisplayName().getText() : "";
-                int nodeNs = node.getNodeId().getNamespaceIndex().intValue();
-
-                SignalSpec included = SignalMatching.firstMatch(includeSpecs, includeNs, idStr, browseName, displayName, nodeNs, true);
-                if (included == null) {
-                    continue;
+            List<NodeId> explicit = new ArrayList<>();
+            for (JsonElement el : signals) {
+                try {
+                    explicit.add(nodeIdFrom(el.getAsJsonObject()));
+                } catch (Exception e) {
+                    LOGGER.warn("[{}] read signal skipped: {}", serverConfig.getId(), e.getMessage());
                 }
-                if (!excludeSpecs.isEmpty()
-                        && SignalMatching.firstMatch(excludeSpecs, excludeNs, idStr, browseName, displayName, nodeNs, false) != null) {
-                    continue;
-                }
-                includeMatched.add(node.getNodeId());
             }
-        }
 
-        List<NodeId> nodeIds = mergeReadTargets(explicit, includeMatched);
-        List<DataValue> values = nodeIds.isEmpty()
-                ? new ArrayList<>()
-                : client.readValuesAsync(0.0, TimestampsToReturn.Both, nodeIds).get();
+            List<NodeId> includeMatched = new ArrayList<>();
+            if (payload != null && payload.has("include")) {
+                List<SignalSpec> includeSpecs;
+                List<SignalSpec> excludeSpecs;
+                try {
+                    includeSpecs = specsFromJson(payload.getAsJsonArray("include"));
+                    excludeSpecs = payload.has("exclude")
+                            ? specsFromJson(payload.getAsJsonArray("exclude"))
+                            : List.of();
+                    // Compile the caller-supplied regexes up front so a malformed pattern (or a non-object
+                    // matcher entry) becomes a coded error reply instead of escaping to a HANDLER_ERROR.
+                    includeSpecs.forEach(SignalSpec::pattern);
+                    excludeSpecs.forEach(SignalSpec::pattern);
+                } catch (Exception e) {
+                    LOGGER.warn("[{}] read include/exclude rejected: {}", serverConfig.getId(), e.toString());
+                    throw new CommandException(ERR_BAD_MATCHER, "invalid include/exclude: " + e.getMessage());
+                }
+                NamespaceTable table = client.getNamespaceTable();
+                Map<SignalSpec, Integer> includeNs = new HashMap<>();
+                includeSpecs.forEach(spec -> includeNs.put(spec, SignalMatching.resolveNamespace(spec, table)));
+                Map<SignalSpec, Integer> excludeNs = new HashMap<>();
+                excludeSpecs.forEach(spec -> excludeNs.put(spec, SignalMatching.resolveNamespace(spec, table)));
 
-        JsonArray reads = new JsonArray();
-        for (int i = 0; i < nodeIds.size(); i++) {
-            NodeId nodeId = nodeIds.get(i);
-            JsonObject signal = new JsonObject();
-            signal.addProperty("id", nodeId.toParseableString());
-            signal.add("address", ValueCodec.address(nodeId, client.getNamespaceTable()));
-            JsonObject read = ValueCodec.toSample(values.get(i));
-            read.add("signal", signal);
-            reads.add(read);
-            counters.incrementReadMetrics();
+                for (UaVariableNode node : allNodes.values()) {
+                    String idStr = node.getNodeId().getIdentifier().toString();
+                    String browseName = node.getBrowseName() != null && node.getBrowseName().getName() != null
+                            ? node.getBrowseName().getName() : "";
+                    String displayName = node.getDisplayName() != null && node.getDisplayName().getText() != null
+                            ? node.getDisplayName().getText() : "";
+                    int nodeNs = node.getNodeId().getNamespaceIndex().intValue();
+
+                    SignalSpec included = SignalMatching.firstMatch(includeSpecs, includeNs, idStr, browseName, displayName, nodeNs, true);
+                    if (included == null) {
+                        continue;
+                    }
+                    if (!excludeSpecs.isEmpty()
+                            && SignalMatching.firstMatch(excludeSpecs, excludeNs, idStr, browseName, displayName, nodeNs, false) != null) {
+                        continue;
+                    }
+                    includeMatched.add(node.getNodeId());
+                }
+            }
+
+            List<NodeId> nodeIds = mergeReadTargets(explicit, includeMatched);
+            List<DataValue> values = nodeIds.isEmpty()
+                    ? new ArrayList<>()
+                    : client.readValuesAsync(0.0, TimestampsToReturn.Both, nodeIds).get();
+
+            JsonArray reads = new JsonArray();
+            for (int i = 0; i < nodeIds.size(); i++) {
+                NodeId nodeId = nodeIds.get(i);
+                JsonObject signal = new JsonObject();
+                signal.addProperty("id", nodeId.toParseableString());
+                signal.add("address", ValueCodec.address(nodeId, client.getNamespaceTable()));
+                JsonObject read = ValueCodec.toSample(values.get(i));
+                read.add("signal", signal);
+                reads.add(read);
+                counters.recordReadRequest();
+            }
+            JsonObject result = new JsonObject();
+            result.addProperty("id", serverConfig.getId());
+            result.add("reads", reads);
+            return result;
+        } catch (Exception e) {
+            counters.recordReadFailure();
+            counters.incrementReadErrors();
+            throw e;
         }
-        JsonObject result = new JsonObject();
-        result.addProperty("id", serverConfig.getId());
-        result.add("reads", reads);
-        return result;
     }
 
     // ---- sb/write --------------------------------------------------------------------------------
@@ -493,7 +506,7 @@ public class CommandService {
 
             if (!w.has("value")) {
                 LOGGER.error("[{}] write entry missing value; skipping: {}", serverConfig.getId(), w);
-                CommandJson.applyWriteFailed(coords, "missing value");
+                markWriteFailed(coords, "missing value");
                 continue;
             }
             NodeId nodeId;
@@ -501,7 +514,7 @@ public class CommandService {
                 nodeId = nodeIdFrom(w);
             } catch (Exception e) {
                 LOGGER.error("[{}] write entry skipped: {}", serverConfig.getId(), e.getMessage());
-                CommandJson.applyWriteFailed(coords, e.getMessage());
+                markWriteFailed(coords, e.getMessage());
                 continue;
             }
             // D-U16 allow-list: match the target's stable signal.id (the parseable ns=…;…=… form, as
@@ -510,8 +523,7 @@ public class CommandService {
             String stableId = nodeId.toParseableString();
             if (!serverConfig.isWriteAllowed(stableId)) {
                 LOGGER.warn("[{}] write to {} rejected: not in writes.allow[]", serverConfig.getId(), stableId);
-                CommandJson.applyWriteFailed(coords, WRITE_NOT_ALLOWED);
-                counters.incrementWriteErrors();
+                markWriteFailed(coords, WRITE_NOT_ALLOWED);
                 emitWriteRejected(stableId);
                 continue;
             }
@@ -520,17 +532,17 @@ public class CommandService {
                 node = client.getAddressSpace().getNode(nodeId);
             } catch (Exception e) {
                 LOGGER.error("[{}] write target {} could not be resolved: {}", serverConfig.getId(), nodeId, e.getMessage());
-                CommandJson.applyWriteFailed(coords, "node not found: " + e.getMessage());
+                markWriteFailed(coords, "node not found: " + e.getMessage());
                 continue;
             }
             if (!(node instanceof UaVariableNode)) {
                 LOGGER.error("[{}] write target {} is not a variable; skipping", serverConfig.getId(), nodeId);
-                CommandJson.applyWriteFailed(coords, "target is not a variable");
+                markWriteFailed(coords, "target is not a variable");
                 continue;
             }
             Variant variant = ValueCodec.variantFromValue(((UaVariableNode) node).getDataType(), w.get("value"));
             if (variant == null) {
-                CommandJson.applyWriteFailed(coords, "unsupported value type or coercion failed");
+                markWriteFailed(coords, "unsupported value type or coercion failed");
                 continue;
             }
             StatusCode statusCode = ValueCodec.statusFromString(w.has("status") ? w.get("status").getAsString() : "GOOD");
@@ -544,9 +556,10 @@ public class CommandService {
             try {
                 List<StatusCode> results = client.writeValues(nodeIds, dataValues);
                 for (int j = 0; j < results.size(); j++) {
-                    counters.incrementWriteMetrics();
+                    counters.recordWriteRequest();
                     StatusCode result = results.get(j);
                     if (result.isBad()) {
+                        counters.recordWriteFailure();
                         counters.incrementWriteErrors();
                         LOGGER.warn("[{}] write to {} returned {}", serverConfig.getId(), nodeIds.get(j), result);
                     }
@@ -559,8 +572,7 @@ public class CommandService {
                 LOGGER.error("[{}] batch write failed: {}", serverConfig.getId(), e.toString());
                 String message = "write failed: " + (e.getMessage() != null ? e.getMessage() : e.toString());
                 for (int entryIdx : batchToEntry) {
-                    CommandJson.applyWriteFailed(perEntry.get(entryIdx), message);
-                    counters.incrementWriteErrors();
+                    markWriteFailed(perEntry.get(entryIdx), message);
                 }
             }
         }
@@ -571,6 +583,12 @@ public class CommandService {
         result.addProperty("id", serverConfig.getId());
         result.add("writes", writesResult);
         return result;
+    }
+
+    private void markWriteFailed(JsonObject entry, String message) {
+        CommandJson.applyWriteFailed(entry, message);
+        counters.recordWriteFailure();
+        counters.incrementWriteErrors();
     }
 
     private void emitWriteRejected(String stableSignalId) {

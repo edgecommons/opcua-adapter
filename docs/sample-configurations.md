@@ -181,7 +181,7 @@ java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
 |--------|----------------------------|
 | `hierarchy` / `identity` | The UNS enterprise hierarchy (last level = the device = thing name) and the values for every other level. Stamped onto every message's top-level `identity` (`path` = `lab/s1/l1/<thing>`) and used for fleet-wide addressing. Level names must match `^[A-Za-z0-9_-]+$`. Changing them changes every consumer's `identity` view (not the data topic, which is device/component/instance-scoped). |
 | `messaging.local` | The **local** MQTT broker the adapter publishes to and listens on. `host`/`port` point at the broker; `clientId` is the MQTT client identity (keep it unique per process or the broker drops the older session). On HOST this is one half of the dual-MQTT transport; add an `iotCore` block (see §3/§5) to also connect to AWS IoT Core. Without a reachable broker the adapter cannot publish or accept commands. |
-| `metricEmission.target` | Where the `southbound_health` metric goes (`log` / `messaging` / `cloudwatch` / `cloudwatchcomponent` / `prometheus`). With `messaging`, health is auto-published on the UNS `metric` class (`ecv1/{device}/{component}/main/metric/southbound_health`) — the topic is minted, so set `targetConfig.destination` (`local`/`iotcore`), **not** a `targetConfig.topic` (the schema rejects it). With `log` it only appears in logs. Observability only. |
+| `metricEmission.target` | Where `southbound_health` plus the OPC UA operational metrics (`OpcUaCommand`, `OpcUaSubscription`, `OpcUaBrowse`, `OpcUaConnection`) go (`log` / `messaging` / `cloudwatch` / `cloudwatchcomponent` / `prometheus`). With `messaging`, metrics are auto-published on the UNS `metric` class (`ecv1/{device}/{component}/main/metric/{metricName}`) — the topic is minted, so set `targetConfig.destination` (`local`/`iotcore`), **not** a `targetConfig.topic` (the schema rejects it). With `log` they only appear in logs. Observability only. |
 | `component.global.defaults` | Fallback timing for every instance/signal that does not set its own. `publishIntervalMs` (server→adapter delivery cadence), `samplingRateMs` (how often the server samples the value; `0` = as fast as the server allows), `queueSize` (server-side per-signal buffer). See the precedence table at the end. |
 | `instances[].id` | Stable, unique instance id (**required**). Appears as the UNS `{instance}` topic segment and as `device.instance` in messages. Each instance is one OPC UA server with its own connection thread, so renaming it changes topic routing and message identity. |
 | `instances[].adapter` | The southbound **adapter type** that should service this instance. This is a single-protocol binary: it treats *every* listed instance as an OPC UA server (it does **not** filter on this field), and the published `device.adapter` is always `"opcua"`. Set it to `"opcua"` for clarity and forward-compatibility with the shared southbound convention (where one config can describe instances for several adapter binaries, e.g. an OPC UA and a Modbus adapter). |
@@ -242,7 +242,7 @@ java -jar OpcUaAdapter-1.0.0.jar --platform GREENGRASS -t my-thing
 |----------------------|----------------------------|
 | No `messaging` section; transport is IPC | The adapter publishes/subscribes through the Nucleus's local IPC pub/sub (and the IoT Core mqttproxy) instead of a TCP MQTT broker. The recipe's `accessControl` grants the IPC and `mqttproxy` topics; the message envelope on the wire is identical to HOST. |
 | `heartbeat.destination: "local"` | Routes the UNS `state` keepalive over the local/IPC transport (on GREENGRASS that is IPC). On HOST it goes to the local MQTT broker. Use `"iotcore"` to push it to AWS IoT Core instead (see §5). Heartbeat config is `{enabled, intervalSecs, measures, destination}`. |
-| `metricEmission.target: "log"` with a `/greengrass/v2/logs/...` path | Health metrics are written to the Nucleus-managed component log directory rather than published — convenient because Greengrass already rotates and ships those logs. |
+| `metricEmission.target: "log"` with a `/greengrass/v2/logs/...` path | Health and OPC UA operational metrics are written to the Nucleus-managed component log directory rather than published — convenient because Greengrass already rotates and ships those logs. |
 | `connection` / `publish` / `subscriptions` | **Identical semantics to HOST.** The OPC UA side does not know or care about the platform; only the transport and config source change. You can lift an instance verbatim between HOST and GREENGRASS. |
 | Cloud override | A `aws greengrassv2 create-deployment` merge config patches these same keys per device/group, so per-site `endpoint`/`tags`/`subscriptions` differences are deployment data, not code. |
 
@@ -489,15 +489,16 @@ messages each carrying ~10 samples arriving ~1 s after the values were read.
 
 Everything in §1–§4 publishes to the **local bus** — Greengrass IPC on the `GREENGRASS`
 platform, the local MQTT broker on `HOST`/`KUBERNETES`. That is the adapter's data plane: it sends
-every `SouthboundSignalUpdate` with the plain `publish` call, which targets the default provider channel
-(the local broker on HOST, IPC on Greengrass). On-box consumers — other components, a historian
-bridge, the rules engine — read those topics.
+every `SouthboundSignalUpdate` through the library `data()` facade, which mints the UNS `data` topic and
+targets the default provider channel (the local broker on HOST, IPC on Greengrass). On-box consumers —
+other components, a historian bridge, the rules engine — read those topics.
 
 **What the adapter sends to the cloud itself.** The one northbound path the adapter wires directly is
-its own *operational* telemetry — the heartbeat and the health metric. The library can deliver them
-straight to AWS IoT Core alongside the local bus: on `HOST`/`KUBERNETES` the dual-MQTT provider holds
-the northbound mTLS session next to the local one. Opt in with `messaging.northbound` plus a heartbeat /
-metric target set to `destination: "northbound"`:
+its own *operational* telemetry — the heartbeat, `southbound_health`, and the OPC UA operational metric
+families (`OpcUaCommand`, `OpcUaSubscription`, `OpcUaBrowse`, `OpcUaConnection`). The library can deliver
+them straight to AWS IoT Core alongside the local bus: on `HOST`/`KUBERNETES` the dual-MQTT provider
+holds the northbound mTLS session next to the local one. Opt in with `messaging.northbound` plus a
+heartbeat / metric target set to `destination: "northbound"`:
 
 ```jsonc
 {
@@ -515,7 +516,8 @@ metric target set to `destination: "northbound"`:
     }
   },
 
-  // Heartbeat and health go to IoT Core (low rate); signal data stays on the local bus.
+  // Heartbeat, health, and operational metrics go to IoT Core (low rate);
+  // signal data stays on the local bus.
   // The state/metric topics are UNS-minted — only the destination is configurable, not the topic.
   "heartbeat": {
     "intervalSecs": 30,
@@ -595,7 +597,7 @@ data:
 | Mounted as a **whole-volume** ConfigMap (never `subPath`) | Preserves the `..data` symlink swap so the `CONFIGMAP` source detects changes and **hot-reloads** subscriptions/timing without a pod restart. Mounting a single key via `subPath` breaks hot reload. |
 | `component` section identical to other platforms | The component **name** (`{ComponentName}`) is fixed by the adapter binary, so it does **not** appear in the config — only the `component` *object* (global/instances) does. The same `component`/`connection`/`subscriptions` shape works verbatim on HOST, GREENGRASS, and KUBERNETES. |
 | `messaging.local.host` = a Service DNS name | The in-cluster MQTT broker reached via Kubernetes Service DNS (`emqx.default.svc.cluster.local`). Point it at your broker Service. |
-| `metricEmission.target: "prometheus"` | Exposes `southbound_health` on the pod's metrics port (default `:9090`) for Prometheus scraping instead of publishing it — the idiomatic k8s path. |
+| `metricEmission.target: "prometheus"` | Exposes `southbound_health` and the OPC UA operational metrics on the pod's metrics port (default `:9090`) for Prometheus scraping instead of publishing them — the idiomatic k8s path. |
 | No `-t/--thing` arg | Identity resolves from the Downward API (`EDGECOMMONS_THING_NAME` ▸ `POD_NAME`). The Deployment also gates traffic on the HTTP health probes (`/startupz`, `/livez`, `/readyz`) the library serves on `:8081`. |
 | `connection` / `subscriptions` | Same OPC UA semantics as every other platform — only the config **source** (ConfigMap) and the metrics/identity wiring differ. Editing the ConfigMap and re-applying changes the live subscription set on the fly. |
 

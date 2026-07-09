@@ -8,6 +8,7 @@ import com.mbreissi.edgecommons.credentials.CredentialService;
 import com.mbreissi.edgecommons.heartbeat.InstanceConnectivity;
 import com.mbreissi.edgecommons.metrics.MetricEmitter;
 import com.mbreissi.edgecommons.opcua.opc.CommandRegistry;
+import com.mbreissi.edgecommons.opcua.opc.OpcUaConnection;
 import com.mbreissi.edgecommons.opcua.opc.OpcUaDevice;
 import com.mbreissi.edgecommons.opcua.opc.config.ServerConfiguration;
 import org.apache.logging.log4j.LogManager;
@@ -27,7 +28,8 @@ import java.util.concurrent.CountDownLatch;
  * and republishes value changes as {@code SouthboundSignalUpdate} messages on the UNS <b>{@code data}</b>
  * class ({@code ecv1/{device}/{component}/{instance}/data/{signalPath}}), serves the {@code cmd/sb/*}
  * command verbs (status/browse/read/write/subscriptions/rescan) on the library command inbox, raises
- * connection/write {@code evt} alarms, and emits the {@code southbound_health} metric. The site
+ * connection/write {@code evt} alarms, and emits {@code southbound_health} plus OPC UA operational
+ * metrics. The site
  * hierarchy rides the top-level {@code identity} envelope element (from {@code hierarchy}/{@code
  * identity} config), stamped automatically per message via {@code gg.instance(id)}.
  */
@@ -101,6 +103,8 @@ public class OpcUaAdapter {
                     }
                     commandRegistry.addDevice(device);   // now routable by the sb/* verbs
                     edgeCommons.setReady(true);            // ready once at least one device is connected + subscribed
+                } catch (OpcUaConnection.UnretryableConnectionException e) {
+                    LOGGER.error("[{}] {}", instanceId, e.getMessage());
                 } catch (Exception e) {
                     LOGGER.error("[{}] failed to start client", instanceId, e);
                 }

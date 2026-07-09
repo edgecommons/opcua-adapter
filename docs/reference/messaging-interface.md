@@ -61,7 +61,7 @@ verb's argument object. A EdgeCommons client's `request()` API sets `header.name
 | `data` | `SouthboundSignalUpdate` | adapter → bus | `ecv1/{device}/{component}/{instance}/data/{signalPath}` | adapter, via `data()` |
 | `cmd` | `sb/*` verbs (below) | bus ↔ adapter | `ecv1/{device}/{component}/main/cmd/sb/{verb}` | library inbox |
 | `evt` | connection/write alarms | adapter → bus | `ecv1/{device}/{component}/{instance}/evt/{severity}/{type}` | adapter, via `events()` |
-| `metric` | `southbound_health` | adapter → bus | `ecv1/{device}/{component}/main/metric/southbound_health` | library (via `MetricEmitter`) |
+| `metric` | `southbound_health`, `OpcUaCommand`, `OpcUaSubscription`, `OpcUaBrowse`, `OpcUaConnection` | adapter → bus | `ecv1/{device}/{component}/main/metric/{metricName}` | library (via `MetricEmitter`) |
 | `state` | keepalive | adapter → bus | `ecv1/{device}/{component}/main/state` | library (heartbeat) |
 | `cfg` | effective config | adapter → bus | `ecv1/{device}/{component}/main/cfg` | library |
 
@@ -73,7 +73,7 @@ verb's argument object. A EdgeCommons client's `request()` API sets `header.name
   guard. The **stable** `signal.id` in the body (the `ns=…;…=…` parseable form) is what consumers key
   on; the path is only the routing address.
 - **`state`/`metric`/`cfg`/`log` are reserved** (library-owned): a component publishing to them
-  directly is rejected. The adapter's health metric reaches `metric/southbound_health` through the
+  directly is rejected. The adapter's metrics reach `metric/{metricName}` through the
   metric subsystem, not a raw publish.
 - **The command inbox is `main`-instance-only** (`ecv1/{device}/{component}/main/cmd/#`) — one per
   component, not per device-instance. Multi-instance routing is by
@@ -251,9 +251,17 @@ Request body `{ "instance": "kep1" }` (optional selector). Result:
 ```jsonc
 { "ok": true, "result": {
     "id": "kep1", "connected": true,
-    "metrics": { "read": { "interval": 1234, "total": 98765 }, "write": { "interval": 2, "total": 40 } } } }
+    "metrics": {
+      "subscribedRead": { "interval": 1234, "total": 98765 },
+      "readRequest": { "interval": 2, "total": 40 },
+      "writeRequest": { "interval": 1, "total": 12 } } } }
 ```
-`connected` is the OPC UA session state; `interval` counts reset each reporting cycle, `total` is lifetime.
+`connected` is the OPC UA session state. `subscribedRead` counts data-change samples from active
+subscriptions, `readRequest` counts explicit `sb/read` samples returned, and `writeRequest` counts
+explicit `sb/write` attempts issued to the server. The status reply also includes the operational
+counters used by the OPC UA metric families below (`readFailure`, `writeFailure`, browse counters,
+subscription re-establishment counters, connection counters, `subscriptionCount`, and
+`monitoredItemCount`). `interval` counts reset each reporting cycle; `total` is lifetime.
 
 ### `sb/subscriptions`
 
@@ -378,6 +386,69 @@ via `MetricEmitter`; routed by `metricEmission.target` (`log`/`messaging`/`cloud
 | `writeErrors` | Count | write failures/rejections over the interval |
 
 Dimensions: `instance` (plus auto-injected `coreName`/`component`).
+
+## OPC UA operational metrics
+
+The adapter emits OPC UA-specific metric families through `MetricEmitter`; they follow the topic
+shape `ecv1/{device}/{component}/main/metric/{metricName}` when `metricEmission.target` is
+`messaging`, and the same names/categories when routed to CloudWatch or Prometheus.
+
+CloudWatch dimensions are intentionally stable: `instance`, plus the library-injected `coreName`,
+`component`, and `category=<metricName>`. Operation/window semantics are metric names, not dimensions,
+so dashboards do not need to filter synthetic `operation` or `window` dimensions.
+
+### `OpcUaCommand`
+
+| Measure | Unit | Meaning |
+|---------|------|---------|
+| `ReadRequestTotal` | Count | lifetime count of explicit `sb/read` samples returned |
+| `ReadRequestInterval` | Count | explicit `sb/read` samples returned in the last reporting interval |
+| `ReadFailureTotal` | Count | lifetime count of failed `sb/read` command requests |
+| `ReadFailureInterval` | Count | failed `sb/read` command requests in the last reporting interval |
+| `WriteRequestTotal` | Count | lifetime count of explicit `sb/write` entries issued to the server |
+| `WriteRequestInterval` | Count | explicit `sb/write` entries issued in the last reporting interval |
+| `WriteFailureTotal` | Count | lifetime count of failed `sb/write` entries, including preflight rejection and bad server status |
+| `WriteFailureInterval` | Count | failed `sb/write` entries in the last reporting interval |
+
+### `OpcUaSubscription`
+
+| Measure | Unit | Meaning |
+|---------|------|---------|
+| `SubscribedReadTotal` | Count | lifetime count of subscription data-change samples received |
+| `SubscribedReadInterval` | Count | subscription data-change samples received in the last reporting interval |
+| `SubscriptionRecreateTotal` | Count | lifetime count of subscription re-establishment attempts after transfer failure |
+| `SubscriptionRecreateInterval` | Count | subscription re-establishment attempts in the last reporting interval |
+| `SubscriptionCount` | Count | active OPC UA subscription objects for the instance |
+| `MonitoredItemCount` | Count | resolved monitored signal count for the instance |
+
+### `OpcUaBrowse`
+
+| Measure | Unit | Meaning |
+|---------|------|---------|
+| `BrowseRequestTotal` | Count | lifetime count of `sb/browse` command requests |
+| `BrowseRequestInterval` | Count | `sb/browse` command requests in the last reporting interval |
+| `BrowseFailureTotal` | Count | lifetime count of failed `sb/browse` command requests |
+| `BrowseFailureInterval` | Count | failed `sb/browse` command requests in the last reporting interval |
+| `BrowseReferenceTotal` | Count | lifetime count of hierarchical references returned by `sb/browse` |
+| `BrowseReferenceInterval` | Count | hierarchical references returned by `sb/browse` in the last reporting interval |
+| `BrowseTruncatedTotal` | Count | lifetime count of `sb/browse` responses truncated by `maxRefs` |
+| `BrowseTruncatedInterval` | Count | truncated `sb/browse` responses in the last reporting interval |
+
+### `OpcUaConnection`
+
+| Measure | Unit | Meaning |
+|---------|------|---------|
+| `ConnectionAttemptTotal` | Count | lifetime count of initial OPC UA connection attempts |
+| `ConnectionAttemptInterval` | Count | initial connection attempts in the last reporting interval |
+| `ConnectionFailureTotal` | Count | lifetime count of failed initial connection attempts |
+| `ConnectionFailureInterval` | Count | failed initial connection attempts in the last reporting interval |
+| `TerminalFailureTotal` | Count | lifetime count of unretryable initial connection failures |
+| `TerminalFailureInterval` | Count | unretryable initial connection failures in the last reporting interval |
+| `SessionDisconnectTotal` | Count | lifetime count of active sessions becoming inactive after initial connection |
+| `SessionDisconnectInterval` | Count | active sessions becoming inactive in the last reporting interval |
+| `SessionReconnectTotal` | Count | lifetime count of inactive sessions becoming active again |
+| `SessionReconnectInterval` | Count | inactive sessions becoming active again in the last reporting interval |
+| `SessionConnected` | Count | `1` connected, `0` down |
 
 ## State keepalive (`state` class)
 

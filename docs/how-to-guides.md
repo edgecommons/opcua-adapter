@@ -199,13 +199,21 @@ from the Downward API — typically no args). See the scaffold's `Dockerfile` an
 
 - **Health metric** `southbound_health` (`connectionState`, `readErrors`, `writeErrors`) flows to your
   `metricEmission.target` (log / messaging → UNS `metric` class / CloudWatch / Prometheus).
+- **Operational metrics** `OpcUaCommand`, `OpcUaSubscription`, `OpcUaBrowse`, and `OpcUaConnection`
+  flow to the same target with per-instance command, subscription, browse, and connection counters.
+  `OpcUaCommand` carries explicit `sb/read`/`sb/write` request and failure counters,
+  `OpcUaSubscription` carries subscription sample counts plus `SubscriptionCount` and
+  `MonitoredItemCount`, `OpcUaBrowse` tracks address-space browse volume/truncation, and
+  `OpcUaConnection` tracks connection attempts, terminal failures, session disconnects/reconnects, and
+  current `SessionConnected`.
 - **State keepalive:** the library publishes `ecv1/{device}/opcua-adapter/main/state` each heartbeat
   tick — subscribe `ecv1/+/+/+/state` to see the whole fleet's liveness.
 - **Per-server connectivity:** the RUNNING `state` keepalive carries `instances[]` — one
   `{ instance, connected, detail }` per configured OPC UA server (`detail` is the endpoint URL) — so
   one `ecv1/+/+/+/state` subscription shows every server's live session state under the one component,
   the passive counterpart to `sb/status`.
-- **Status query:** `sb/status` verb → `{ id, connected, metrics }`.
+- **Status query:** `sb/status` verb → `{ id, connected, metrics }`, where `metrics` has the same
+  per-instance counters used by the operational metric families.
 - **Subscriptions query:** `sb/subscriptions` verb → the resolved signal list.
 - **Browse query:** `sb/browse` verb → hierarchical address-space references from a requested root
   (id, namespace, name, node class, reference type, data type where known) — for discovering what's
