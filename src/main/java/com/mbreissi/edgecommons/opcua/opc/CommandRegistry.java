@@ -1,5 +1,6 @@
 package com.mbreissi.edgecommons.opcua.opc;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mbreissi.edgecommons.commands.CommandException;
 import com.mbreissi.edgecommons.commands.CommandInbox;
@@ -24,7 +25,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * come up, so a verb aimed at a not-yet-connected instance replies with {@code UNKNOWN_INSTANCE}
  * rather than blocking.
  *
- * <p>Verbs (all request/reply): {@code sb/status}, {@code sb/browse} (paged), {@code sb/read}
+ * <p>Verbs (all request/reply): {@code sb/status}, {@code sb/browse} (hierarchical refs),
+ * {@code sb/read}
  * (ref-accepting, regex include/exclude), {@code sb/write} (confirmed, allow-listed batch),
  * {@code sb/subscriptions}, and {@code sb/rescan} (re-browse the address space).
  */
@@ -66,7 +68,101 @@ public class CommandRegistry {
         commands.register("sb/write", req -> route(req).commandService().write(req));
         commands.register("sb/subscriptions", req -> route(req).commandService().subscriptions());
         commands.register("sb/rescan", req -> route(req).rescan());
+        registerPanels();
         LOGGER.info("Registered southbound command verbs: {}", commands.verbs());
+    }
+
+    /** Registers the descriptor-driven component panels exposed by {@code cmd/describe}. */
+    private void registerPanels() {
+        commands.registerPanel(panel("overview", "Overview", 10,
+                summaryWidget("opcua-summary", "OPC UA adapter",
+                        row("Address space", "Hierarchical browse via cmd/sb/browse"),
+                        row("Reads", "Explicit node reads and configured-signal matching"),
+                        row("Diagnostics", "Status, subscriptions, and rescan commands")),
+                commandSummaryWidget("opcua-command-bindings", "Command bindings",
+                        "sb/status", "sb/browse", "sb/read", "sb/write", "sb/subscriptions", "sb/rescan")));
+        commands.registerPanel(panel("address-space", "Address Space", 20,
+                treeBrowserWidget("address-space-tree", "Address space",
+                        "sb/browse", "sb/read", "sb/write")));
+        commands.registerPanel(panel("signals", "Signals", 30,
+                signalGridWidget("configured-signals", "Configured signals", "sb/subscriptions", "sb/read")));
+        commands.registerPanel(panel("diagnostics", "Diagnostics", 40,
+                commandSummaryWidget("diagnostic-commands", "Diagnostic commands",
+                        "sb/status", "sb/subscriptions", "sb/rescan"),
+                summaryWidget("diagnostic-notes", "Diagnostics",
+                        row("Status", "Live southbound session and address-space counters"),
+                        row("Subscriptions", "Configured signal bindings by instance"),
+                        row("Rescan", "Rebuild the discovered address-space cache"))));
+    }
+
+    private static JsonObject panel(String id, String title, int order, JsonObject... widgets) {
+        JsonObject panel = new JsonObject();
+        panel.addProperty("id", id);
+        panel.addProperty("title", title);
+        panel.addProperty("order", order);
+        JsonArray widgetArray = new JsonArray();
+        for (JsonObject widget : widgets) {
+            widgetArray.add(widget);
+        }
+        panel.add("widgets", widgetArray);
+        return panel;
+    }
+
+    private static JsonObject summaryWidget(String id, String title, JsonObject... rows) {
+        JsonObject widget = baseWidget("summary", id, title);
+        JsonArray rowArray = new JsonArray();
+        for (JsonObject row : rows) {
+            rowArray.add(row);
+        }
+        widget.add("rows", rowArray);
+        return widget;
+    }
+
+    private static JsonObject commandSummaryWidget(String id, String title, String... verbs) {
+        JsonObject widget = baseWidget("commandSummary", id, title);
+        JsonArray verbArray = new JsonArray();
+        for (String verb : verbs) {
+            verbArray.add(verb);
+        }
+        widget.add("verbs", verbArray);
+        return widget;
+    }
+
+    private static JsonObject treeBrowserWidget(String id, String title,
+                                                String browseVerb, String readVerb,
+                                                String writeVerb) {
+        JsonObject widget = baseWidget("treeBrowser", id, title);
+        widget.addProperty("scope", "instance");
+        widget.addProperty("mode", "hierarchical");
+        widget.addProperty("rootRef", "root");
+        widget.addProperty("browseVerb", browseVerb);
+        widget.addProperty("readVerb", readVerb);
+        widget.addProperty("writeVerb", writeVerb);
+        return widget;
+    }
+
+    private static JsonObject signalGridWidget(String id, String title,
+                                               String subscriptionsVerb, String readVerb) {
+        JsonObject widget = baseWidget("signalGrid", id, title);
+        widget.addProperty("scope", "instance");
+        widget.addProperty("subscriptionsVerb", subscriptionsVerb);
+        widget.addProperty("readVerb", readVerb);
+        return widget;
+    }
+
+    private static JsonObject baseWidget(String kind, String id, String title) {
+        JsonObject widget = new JsonObject();
+        widget.addProperty("kind", kind);
+        widget.addProperty("id", id);
+        widget.addProperty("title", title);
+        return widget;
+    }
+
+    private static JsonObject row(String label, String value) {
+        JsonObject row = new JsonObject();
+        row.addProperty("label", label);
+        row.addProperty("value", value);
+        return row;
     }
 
     /**

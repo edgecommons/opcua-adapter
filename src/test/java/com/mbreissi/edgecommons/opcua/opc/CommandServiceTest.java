@@ -1,5 +1,6 @@
 package com.mbreissi.edgecommons.opcua.opc;
 
+import com.google.gson.JsonObject;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.junit.jupiter.api.Test;
 
@@ -9,6 +10,17 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class CommandServiceTest {
+
+    // ---- sb/browse hierarchy bounds --------------------------------------------------------------
+
+    @Test
+    void boundedInt_clampsTreeLimits() {
+        JsonObject request = new JsonObject();
+        request.addProperty("depth", 99);
+        assertEquals(4, CommandService.boundedInt(request, "depth", 1, 0, 4));
+        request.addProperty("depth", -3);
+        assertEquals(0, CommandService.boundedInt(request, "depth", 1, 0, 4));
+    }
 
     // ---- mergeReadTargets (read explicit + include dedup) ----------------------------------------
 

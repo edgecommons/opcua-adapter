@@ -15,12 +15,21 @@ import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
 import org.eclipse.milo.opcua.sdk.client.nodes.UaNode;
 import org.eclipse.milo.opcua.sdk.client.nodes.UaVariableNode;
 import org.eclipse.milo.opcua.stack.core.NamespaceTable;
+import org.eclipse.milo.opcua.stack.core.NodeIds;
 import org.eclipse.milo.opcua.stack.core.OpcUaDataType;
 import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
+import org.eclipse.milo.opcua.stack.core.types.builtin.LocalizedText;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
+import org.eclipse.milo.opcua.stack.core.types.builtin.QualifiedName;
 import org.eclipse.milo.opcua.stack.core.types.builtin.StatusCode;
 import org.eclipse.milo.opcua.stack.core.types.builtin.Variant;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.BrowseDirection;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.BrowseResultMask;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.NodeClass;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.TimestampsToReturn;
+import org.eclipse.milo.opcua.stack.core.types.structured.BrowseDescription;
+import org.eclipse.milo.opcua.stack.core.types.structured.BrowseResult;
+import org.eclipse.milo.opcua.stack.core.types.structured.ReferenceDescription;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -31,9 +40,12 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
+import static org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.uint;
+
 /**
  * One device instance's southbound command logic, exposed as the UNS {@code cmd/sb/*} verb family
- * (docs/SOUTHBOUND.md §2.2): {@code sb/status}, {@code sb/browse} (paged), {@code sb/read}
+ * (docs/SOUTHBOUND.md §2.2): {@code sb/status}, {@code sb/browse} (hierarchical refs),
+ * {@code sb/read}
  * (ref-accepting, regex include/exclude), {@code sb/write} (confirmed, allow-listed batch), and
  * {@code sb/subscriptions}. Each verb method returns the verb-specific <b>result object</b> — the
  * library {@link com.mbreissi.edgecommons.commands.CommandInbox} wraps it as
@@ -48,11 +60,16 @@ public class CommandService {
 
     private static final Logger LOGGER = LogManager.getLogger(CommandService.class);
 
-    /** Default cap on nodes returned by one {@code sb/browse} reply (keeps it well under a 1 MB broker/IPC limit). */
-    private static final int DEFAULT_NODES_LIMIT = 2000;
+    private static final int DEFAULT_TREE_DEPTH = 1;
+    private static final int MAX_TREE_DEPTH = 4;
+    private static final int DEFAULT_TREE_MAX_REFS = 500;
+    private static final int MAX_TREE_MAX_REFS = 2000;
 
     /** Error code: an {@code sb/read} {@code include}/{@code exclude} matcher was malformed. */
     public static final String ERR_BAD_MATCHER = "BAD_MATCHER";
+
+    /** Error code: an {@code sb/browse} hierarchical root reference was malformed. */
+    public static final String ERR_BAD_BROWSE_REF = "BAD_BROWSE_REF";
 
     /** Status marker on an {@code sb/write} entry rejected by {@code writes.allow[]}. */
     private static final String WRITE_NOT_ALLOWED = "write not allowed by writes.allow[]";
@@ -115,65 +132,238 @@ public class CommandService {
     // ---- sb/browse -------------------------------------------------------------------------------
 
     /**
-     * {@code sb/browse}: paged enumeration of the browsed address space. Optional request body
-     * {@code {offset, limit}}; result {@code {id, total, offset, limit, truncated, nodes}}. The address
-     * space can hold tens of thousands of nodes, so a single unpaged reply would blow past the
-     * broker/IPC max message size (EMQX's 1 MB default) and be silently dropped — page over a stable
-     * snapshot instead.
+     * {@code sb/browse}: hierarchical browse refs. Request body
+     * {@code {ref?, depth?, maxRefs?}} returns {@code {id, mode:"hierarchical", root}} where each node
+     * carries its outgoing hierarchical {@code refs}.
      */
-    public JsonObject browse(Message request) {
+    public JsonObject browse(Message request) throws CommandException {
         JsonObject reqBody = asJsonObject(request);
-        int total = allNodes.size();
-        int offset = reqBody != null && reqBody.has("offset") ? Math.max(0, reqBody.get("offset").getAsInt()) : 0;
-        int limit = reqBody != null && reqBody.has("limit") ? Math.max(0, reqBody.get("limit").getAsInt()) : DEFAULT_NODES_LIMIT;
+        return browseHierarchical(reqBody);
+    }
 
-        JsonArray nodes = new JsonArray();
-        boolean truncated = false;
-        int index = -1;
-        int emitted = 0;
-        for (UaVariableNode node : allNodes.values()) {
-            index++;
-            if (index < offset) {
-                continue;
-            }
-            if (emitted >= limit) {
-                truncated = true;
-                break;
-            }
-            try {
-                NodeId id = node.getNodeId();
-                int ns = id.getNamespaceIndex().intValue();
-                String uri = client.getNamespaceTable().get(ns);
-                String browseName = node.getBrowseName() != null && node.getBrowseName().getName() != null
-                        ? node.getBrowseName().getName() : null;
-                String displayName = node.getDisplayName() != null && node.getDisplayName().getText() != null
-                        ? node.getDisplayName().getText() : null;
-                String name = displayName != null ? displayName : browseName;
-                String dataType = null;
-                try {
-                    NodeId dt = node.getDataType();
-                    if (dt != null) {
-                        OpcUaDataType builtin = OpcUaDataType.fromNodeId(dt);
-                        dataType = builtin != null ? builtin.name() : dt.toParseableString();
-                    }
-                } catch (Exception ignore) {
-                    // best-effort: an unreadable data type just omits the field
-                }
-                nodes.add(CommandJson.nodeEntry(ns, uri, id.getIdentifier().toString(),
-                        ValueCodec.idTypeName(id), name, dataType));
-            } catch (Exception e) {
-                LOGGER.trace("[{}] browse: skipping unreadable node: {}", serverConfig.getId(), e.toString());
-            }
-            emitted++;
-        }
+    private JsonObject browseHierarchical(JsonObject reqBody) throws CommandException {
+        NodeId rootId = browseRoot(reqBody);
+        int depth = boundedInt(reqBody, "depth", DEFAULT_TREE_DEPTH, 0, MAX_TREE_DEPTH);
+        int maxRefs = boundedInt(reqBody, "maxRefs", DEFAULT_TREE_MAX_REFS, 1, MAX_TREE_MAX_REFS);
+        BrowseBudget budget = new BrowseBudget(maxRefs);
+
+        JsonObject root = nodeObject(rootId);
+        addHierarchicalRefs(root, rootId, depth, budget, new HashSet<>());
+
         JsonObject result = new JsonObject();
         result.addProperty("id", serverConfig.getId());
-        result.addProperty("total", total);
-        result.addProperty("offset", offset);
-        result.addProperty("limit", limit);
-        result.addProperty("truncated", truncated);
-        result.add("nodes", nodes);
+        result.addProperty("mode", "hierarchical");
+        result.addProperty("ref", rootId.toParseableString());
+        result.addProperty("depth", depth);
+        result.addProperty("maxRefs", maxRefs);
+        result.addProperty("refCount", budget.emitted);
+        result.addProperty("truncated", budget.truncated);
+        result.add("root", root);
         return result;
+    }
+
+    static int boundedInt(JsonObject reqBody, String key, int defaultValue, int min, int max) {
+        if (reqBody == null || !reqBody.has(key) || reqBody.get(key).isJsonNull()) {
+            return defaultValue;
+        }
+        int value = reqBody.get(key).getAsInt();
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private NodeId browseRoot(JsonObject reqBody) throws CommandException {
+        if (reqBody == null || !reqBody.has("ref") || reqBody.get("ref").isJsonNull()) {
+            return NodeIds.RootFolder;
+        }
+        JsonElement ref = reqBody.get("ref");
+        if (ref.isJsonObject()) {
+            try {
+                return nodeIdFrom(ref.getAsJsonObject());
+            } catch (Exception e) {
+                throw new CommandException(ERR_BAD_BROWSE_REF, "invalid browse ref object: " + e.getMessage());
+            }
+        }
+        String value = ref.getAsString();
+        if (value == null || value.isBlank() || "root".equalsIgnoreCase(value)) {
+            return NodeIds.RootFolder;
+        }
+        if ("objects".equalsIgnoreCase(value)) {
+            return NodeIds.ObjectsFolder;
+        }
+        if ("types".equalsIgnoreCase(value)) {
+            return NodeIds.TypesFolder;
+        }
+        if ("views".equalsIgnoreCase(value)) {
+            return NodeIds.ViewsFolder;
+        }
+        try {
+            return NodeId.parse(value);
+        } catch (Exception e) {
+            throw new CommandException(ERR_BAD_BROWSE_REF,
+                    "invalid browse ref '" + value + "'; use 'root' or a parseable NodeId such as ns=2;s=Channel.Device.Tag");
+        }
+    }
+
+    private void addHierarchicalRefs(JsonObject node, NodeId nodeId, int remainingDepth,
+                                     BrowseBudget budget, Set<NodeId> path) {
+        if (remainingDepth <= 0 || budget.exhausted()) {
+            return;
+        }
+        if (!path.add(nodeId)) {
+            node.addProperty("cycle", true);
+            return;
+        }
+        JsonArray refs = new JsonArray();
+        try {
+            BrowseDescription browse = new BrowseDescription(
+                    nodeId,
+                    BrowseDirection.Forward,
+                    NodeIds.HierarchicalReferences,
+                    true,
+                    uint(NodeClass.Object.getValue() | NodeClass.Variable.getValue() | NodeClass.Method.getValue()),
+                    uint(BrowseResultMask.All.getValue()));
+            BrowseResult result = client.browse(browse);
+            ReferenceDescription[] references = result.getReferences();
+            if (references != null) {
+                for (ReferenceDescription rd : references) {
+                    if (budget.exhausted()) {
+                        break;
+                    }
+                    JsonObject ref = referenceObject(rd);
+                    refs.add(ref);
+                    budget.take();
+                    rd.getNodeId().toNodeId(client.getNamespaceTable()).ifPresent(targetId -> {
+                        JsonObject target = nodeObject(targetId, rd.getNodeClass(), rd.getBrowseName(), rd.getDisplayName());
+                        if (remainingDepth > 1 && !budget.exhausted()) {
+                            addHierarchicalRefs(target, targetId, remainingDepth - 1, budget, new HashSet<>(path));
+                        }
+                        ref.add("target", target);
+                    });
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.trace("[{}] hierarchical browse of {} failed: {}", serverConfig.getId(), nodeId, e.toString());
+            node.addProperty("browseError", e.getMessage() != null ? e.getMessage() : e.toString());
+        } finally {
+            path.remove(nodeId);
+        }
+        node.add("refs", refs);
+        if (budget.truncated) {
+            node.addProperty("truncated", true);
+        }
+    }
+
+    private JsonObject referenceObject(ReferenceDescription rd) {
+        JsonObject ref = new JsonObject();
+        NodeId referenceTypeId = rd.getReferenceTypeId();
+        if (referenceTypeId != null && referenceTypeId.isNotNull()) {
+            ref.addProperty("referenceTypeId", referenceTypeId.toParseableString());
+            ref.addProperty("referenceType", referenceTypeName(referenceTypeId));
+        }
+        if (rd.getIsForward() != null) {
+            ref.addProperty("isForward", rd.getIsForward());
+        }
+        if (rd.getNodeId() != null && rd.getNodeId().isNotNull()) {
+            ref.addProperty("targetNodeId", rd.getNodeId().toParseableString());
+        }
+        if (rd.getTypeDefinition() != null && rd.getTypeDefinition().isNotNull()) {
+            ref.addProperty("typeDefinition", rd.getTypeDefinition().toParseableString());
+        }
+        return ref;
+    }
+
+    private String referenceTypeName(NodeId referenceTypeId) {
+        try {
+            UaNode refTypeNode = client.getAddressSpace().getNode(referenceTypeId);
+            QualifiedName browseName = refTypeNode.getBrowseName();
+            if (browseName != null && browseName.getName() != null) {
+                return browseName.getName();
+            }
+        } catch (Exception ignore) {
+            // The parseable id still gives callers a stable reference type when lookup is denied.
+        }
+        return referenceTypeId.toParseableString();
+    }
+
+    private JsonObject nodeObject(NodeId id) {
+        try {
+            UaNode node = client.getAddressSpace().getNode(id);
+            return nodeObject(id, node.getNodeClass(), node.getBrowseName(), node.getDisplayName());
+        } catch (Exception e) {
+            JsonObject ret = nodeObject(id, null, null, null);
+            if (NodeIds.RootFolder.equals(id)) {
+                ret.addProperty("name", "Root");
+                ret.addProperty("browseName", "Root");
+                ret.addProperty("nodeClass", NodeClass.Object.name());
+            }
+            return ret;
+        }
+    }
+
+    private JsonObject nodeObject(NodeId id, NodeClass nodeClass, QualifiedName browseName, LocalizedText displayName) {
+        int ns = id.getNamespaceIndex().intValue();
+        String uri = client.getNamespaceTable().get(ns);
+        String browse = browseName != null && browseName.getName() != null ? browseName.getName() : null;
+        String display = displayName != null && displayName.getText() != null ? displayName.getText() : null;
+        String name = display != null ? display : browse;
+        String dataType = dataTypeName(id, nodeClass);
+        JsonObject ret = CommandJson.nodeEntry(ns, uri, id.getIdentifier().toString(),
+                ValueCodec.idTypeName(id), name, dataType);
+        ret.addProperty("nodeId", id.toParseableString());
+        if (browse != null) {
+            ret.addProperty("browseName", browse);
+        }
+        if (nodeClass != null) {
+            ret.addProperty("nodeClass", nodeClass.name());
+        }
+        return ret;
+    }
+
+    private String dataTypeName(NodeId id, NodeClass nodeClass) {
+        if (nodeClass != NodeClass.Variable) {
+            return null;
+        }
+        try {
+            UaVariableNode variable = allNodes.get(id);
+            if (variable == null) {
+                UaNode node = client.getAddressSpace().getNode(id);
+                if (node instanceof UaVariableNode) {
+                    variable = (UaVariableNode) node;
+                }
+            }
+            if (variable == null) {
+                return null;
+            }
+            NodeId dt = variable.getDataType();
+            if (dt == null) {
+                return null;
+            }
+            OpcUaDataType builtin = OpcUaDataType.fromNodeId(dt);
+            return builtin != null ? builtin.name() : dt.toParseableString();
+        } catch (Exception ignore) {
+            return null;
+        }
+    }
+
+    private static final class BrowseBudget {
+        private final int maxRefs;
+        private int emitted;
+        private boolean truncated;
+
+        BrowseBudget(int maxRefs) {
+            this.maxRefs = maxRefs;
+        }
+
+        boolean exhausted() {
+            if (emitted >= maxRefs) {
+                truncated = true;
+                return true;
+            }
+            return false;
+        }
+
+        void take() {
+            emitted++;
+        }
     }
 
     // ---- sb/read ---------------------------------------------------------------------------------

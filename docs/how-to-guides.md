@@ -207,9 +207,10 @@ from the Downward API — typically no args). See the scaffold's `Dockerfile` an
   the passive counterpart to `sb/status`.
 - **Status query:** `sb/status` verb → `{ id, connected, metrics }`.
 - **Subscriptions query:** `sb/subscriptions` verb → the resolved signal list.
-- **Browse query:** `sb/browse` verb (paged) → every variable node found browsing the server's address
-  space (id, namespace, name, data type) — for discovering what's available to subscribe to, read, or
-  write, independent of what's currently configured. `sb/rescan` refreshes it.
+- **Browse query:** `sb/browse` verb → hierarchical address-space references from a requested root
+  (id, namespace, name, node class, reference type, data type where known) — for discovering what's
+  available to subscribe to, read, or write, independent of what's currently configured. `sb/rescan`
+  refreshes the adapter's discovered variable-node cache.
 - **Events:** `evt/critical/connection-lost` on session transitions — the connection-lost **raise**
   (`alarm:true, active:true`) and the connection-restored **clear** (`alarm:true, active:false`) ride
   the *same* channel (a console tracking `evt/critical/#` sees both) — and `evt/warning/write-rejected`

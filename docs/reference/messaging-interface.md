@@ -101,7 +101,7 @@ connected, omitting it returns `INSTANCE_REQUIRED`; naming an unconnected/unknow
 | Verb | Kind | Purpose |
 |------|------|---------|
 | `sb/status` | request/reply | instance/connection status + counters |
-| `sb/browse` | request/reply, **paged** | enumerate the browsed address space |
+| `sb/browse` | request/reply | browse hierarchical address-space references |
 | `sb/read` | request/reply | on-demand read (explicit list and/or regex include/exclude) |
 | `sb/write` | request/reply, **confirmed** | allow-listed batch write, per-entry ack |
 | `sb/subscriptions` | request/reply | the currently resolved/subscribed signals |
@@ -265,34 +265,73 @@ namespace index and its URI, and the matcher that selected it:
     "namespaceUri": "urn:kepware:KEPServerEX", "match": "^…Sine.*" } ] } }
 ```
 
-### `sb/browse` (paged)
+### `sb/browse` (hierarchical refs)
 
-Request body optional `{ "instance": "kep1", "offset": <int>, "limit": <int> }`. Enumerates the
-variable nodes found while browsing the server at connect time (or after `sb/rescan`) — for
-discovery/commissioning and to build read/write/subscription matchers against real node identifiers.
+Request body optional `{ "instance": "kep1", "ref": "root", "depth": 1, "maxRefs": 500 }`. Browses
+forward OPC UA `HierarchicalReferences` from the requested root and returns a nested tree of
+references. `ref` may be `"root"` (default), `"objects"`, `"types"`, `"views"`, a parseable OPC UA
+NodeId such as `"ns=2;s=Channel1.Device1"`, or a normal command ref object with `namespaceUri`/`ns`,
+`signalId`, and optional `idType`.
 
-**Paging.** A large address space would exceed the broker/IPC max message size in a single reply, so
-the list is paged over a stable snapshot: `offset` (default `0`) and `limit` (default `2000`) select a
-window; the result reports `total`, the applied `offset`/`limit`, and `truncated` (`true` when more
-nodes remain — page again with a higher `offset`).
+`depth` defaults to `1` and is clamped to `0..4`. `maxRefs` defaults to `500` and is clamped to
+`1..2000`; when the adapter has to stop before returning every requested descendant, `truncated` is
+`true`.
 
 ```jsonc
-{ "ok": true, "result": {
-    "id": "kep1", "total": 8123, "offset": 0, "limit": 2000, "truncated": true,
-    "nodes": [
-      { "signalId": "Channel1.Device1.Sine1", "namespace": 2, "idType": "String",
-        "namespaceUri": "urn:kepware:KEPServerEX", "name": "Sine1", "dataType": "Double" },
-      { "signalId": "1001", "namespace": 2, "idType": "Numeric", "namespaceUri": "urn:kepware:KEPServerEX" } ] } }
+{
+  "ok": true,
+  "result": {
+    "id": "kep1",
+    "mode": "hierarchical",
+    "ref": "ns=0;i=84",
+    "depth": 1,
+    "maxRefs": 500,
+    "refCount": 1,
+    "truncated": false,
+    "root": {
+      "nodeId": "ns=0;i=84",
+      "signalId": "84",
+      "namespace": 0,
+      "namespaceUri": "http://opcfoundation.org/UA/",
+      "idType": "Numeric",
+      "name": "Root",
+      "browseName": "Root",
+      "nodeClass": "Object",
+      "refs": [
+        {
+          "referenceTypeId": "ns=0;i=35",
+          "referenceType": "Organizes",
+          "isForward": true,
+          "targetNodeId": "ns=0;i=85",
+          "target": {
+            "nodeId": "ns=0;i=85",
+            "signalId": "85",
+            "namespace": 0,
+            "idType": "Numeric",
+            "name": "Objects",
+            "browseName": "Objects",
+            "nodeClass": "Object",
+            "refs": []
+          }
+        }
+      ]
+    }
+  }
+}
 ```
 
 | Node field | Notes |
 |------------|-------|
-| `signalId` | node identifier (bare) |
+| `nodeId` | parseable OPC UA NodeId, best for follow-up browse calls |
+| `signalId` | bare node identifier; with `namespaceUri`/`ns` and `idType`, usable for read/write refs |
 | `namespace` | the node's current namespace index |
 | `idType` | `Numeric` \| `String` \| `Guid` \| `Opaque` — echo `Numeric`/`Guid` on a read/write to round-trip a non-string id. `Opaque` is reported for discovery only: it is **not** writable/round-trippable (a write/read reconstructs it as a `String` id), matching the `sb/write` field table's `Numeric` \| `String` \| `Guid`. |
 | `namespaceUri` | that namespace's URI, when resolvable |
 | `name` | display name, else browse name; omitted if neither is set |
+| `browseName` | OPC UA browse name, when available |
+| `nodeClass` | OPC UA node class, such as `Object`, `Variable`, or `Method` |
 | `dataType` | the node's OPC UA scalar type name (e.g. `Double`), or its raw type NodeId; omitted if unreadable |
+| `refs` | outgoing hierarchical references; each ref carries `referenceType`, `referenceTypeId`, `targetNodeId`, and a nested `target` when resolvable |
 
 ### `sb/rescan`
 

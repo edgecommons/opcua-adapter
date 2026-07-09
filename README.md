@@ -34,7 +34,7 @@ Full operator/integrator docs are in **[`docs/`](docs/)**, organized by [Diátax
   passed explicitly from OPC UA's own `StatusCode`, never defaulted — + native `qualityRaw` +
   source/server timestamps), batched per signal, stamped with the top-level `identity`.
 - **Command surface** — `cmd/sb/*` verbs on the library inbox: `sb/read`, allow-listed `sb/write`
-  (confirmed, per-entry ack), `sb/browse` (paged address-space enumeration), `sb/status`,
+  (confirmed, per-entry ack), `sb/browse` (hierarchical address-space refs), `sb/status`,
   `sb/subscriptions`, `sb/rescan`. Multi-instance requests carry an `instance` selector.
 - **Events** — operator-facing `evt` alarms published through the library **`events()` facade**
   (channel `evt/{severity}/{type}`, derived from the body so it can never disagree with the topic):
