@@ -374,81 +374,12 @@ uniformly `{severity}/{type}`.
 
 Subscribe `ecv1/+/+/+/evt/#` for every adapter event, or `ecv1/+/+/+/evt/critical/#` for just alarms.
 
-## `southbound_health` (metric)
+## Metrics (`metric` class, reserved — automatic)
 
-Auto-published on the UNS `metric` class (`ecv1/{device}/{component}/main/metric/southbound_health`)
-via `MetricEmitter`; routed by `metricEmission.target` (`log`/`messaging`/`cloudwatch`/`prometheus`).
-
-| Measure | Unit | Meaning |
-|---------|------|---------|
-| `connectionState` | Count | `1` connected, `0` down |
-| `readErrors` | Count | read errors over the interval |
-| `writeErrors` | Count | write failures/rejections over the interval |
-
-Dimensions: `instance` (plus auto-injected `coreName`/`component`).
-
-## OPC UA operational metrics
-
-The adapter emits OPC UA-specific metric families through `MetricEmitter`; they follow the topic
-shape `ecv1/{device}/{component}/main/metric/{metricName}` when `metricEmission.target` is
-`messaging`, and the same names/categories when routed to CloudWatch or Prometheus.
-
-CloudWatch dimensions are intentionally stable: `instance`, plus the library-injected `coreName`,
-`component`, and `category=<metricName>`. Operation/window semantics are metric names, not dimensions,
-so dashboards do not need to filter synthetic `operation` or `window` dimensions.
-
-### `OpcUaCommand`
-
-| Measure | Unit | Meaning |
-|---------|------|---------|
-| `ReadRequestTotal` | Count | lifetime count of explicit `sb/read` samples returned |
-| `ReadRequestInterval` | Count | explicit `sb/read` samples returned in the last reporting interval |
-| `ReadFailureTotal` | Count | lifetime count of failed `sb/read` command requests |
-| `ReadFailureInterval` | Count | failed `sb/read` command requests in the last reporting interval |
-| `WriteRequestTotal` | Count | lifetime count of explicit `sb/write` entries issued to the server |
-| `WriteRequestInterval` | Count | explicit `sb/write` entries issued in the last reporting interval |
-| `WriteFailureTotal` | Count | lifetime count of failed `sb/write` entries, including preflight rejection and bad server status |
-| `WriteFailureInterval` | Count | failed `sb/write` entries in the last reporting interval |
-
-### `OpcUaSubscription`
-
-| Measure | Unit | Meaning |
-|---------|------|---------|
-| `SubscribedReadTotal` | Count | lifetime count of subscription data-change samples received |
-| `SubscribedReadInterval` | Count | subscription data-change samples received in the last reporting interval |
-| `SubscriptionRecreateTotal` | Count | lifetime count of subscription re-establishment attempts after transfer failure |
-| `SubscriptionRecreateInterval` | Count | subscription re-establishment attempts in the last reporting interval |
-| `SubscriptionCount` | Count | active OPC UA subscription objects for the instance |
-| `MonitoredItemCount` | Count | resolved monitored signal count for the instance |
-
-### `OpcUaBrowse`
-
-| Measure | Unit | Meaning |
-|---------|------|---------|
-| `BrowseRequestTotal` | Count | lifetime count of `sb/browse` command requests |
-| `BrowseRequestInterval` | Count | `sb/browse` command requests in the last reporting interval |
-| `BrowseFailureTotal` | Count | lifetime count of failed `sb/browse` command requests |
-| `BrowseFailureInterval` | Count | failed `sb/browse` command requests in the last reporting interval |
-| `BrowseReferenceTotal` | Count | lifetime count of hierarchical references returned by `sb/browse` |
-| `BrowseReferenceInterval` | Count | hierarchical references returned by `sb/browse` in the last reporting interval |
-| `BrowseTruncatedTotal` | Count | lifetime count of `sb/browse` responses truncated by `maxRefs` |
-| `BrowseTruncatedInterval` | Count | truncated `sb/browse` responses in the last reporting interval |
-
-### `OpcUaConnection`
-
-| Measure | Unit | Meaning |
-|---------|------|---------|
-| `ConnectionAttemptTotal` | Count | lifetime count of initial OPC UA connection attempts |
-| `ConnectionAttemptInterval` | Count | initial connection attempts in the last reporting interval |
-| `ConnectionFailureTotal` | Count | lifetime count of failed initial connection attempts |
-| `ConnectionFailureInterval` | Count | failed initial connection attempts in the last reporting interval |
-| `TerminalFailureTotal` | Count | lifetime count of unretryable initial connection failures |
-| `TerminalFailureInterval` | Count | unretryable initial connection failures in the last reporting interval |
-| `SessionDisconnectTotal` | Count | lifetime count of active sessions becoming inactive after initial connection |
-| `SessionDisconnectInterval` | Count | active sessions becoming inactive in the last reporting interval |
-| `SessionReconnectTotal` | Count | lifetime count of inactive sessions becoming active again |
-| `SessionReconnectInterval` | Count | inactive sessions becoming active again in the last reporting interval |
-| `SessionConnected` | Count | `1` connected, `0` down |
+The metric subsystem publishes health and OPC UA operational metrics on the reserved `metric` class
+(`ecv1/{device}/{component}/main/metric/{metricName}`) through `MetricEmitter`; the component never
+addresses that topic itself. For every metric's dimensions, measures, units, and diagnostic purpose,
+see [Reference - Metrics](metrics.md).
 
 ## State keepalive (`state` class)
 

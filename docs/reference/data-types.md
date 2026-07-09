@@ -93,7 +93,7 @@ leaving the value unchanged. The `ExtensionObject` (structure) row is confirmed 
   `"value": null`.
 - **Quality, not exceptions.** An unreadable or unknown node returns an entry with `quality` `BAD`
   (not an error); see the [sample object](messaging-interface.md#sample-object) and
-  [quality](messaging-interface.md#southbound_health-metric). Type coercion that fails on write skips
+  [metrics](metrics.md#southbound_health). Type coercion that fails on write skips
   only that entry.
 - **KEP BCD / LBCD (codes 11 / 12).** These are KEPServerEX register *presentations*, exposed over
   OPC UA as their underlying numeric type (typically `UInt16` / `UInt32`); they ride the matching
