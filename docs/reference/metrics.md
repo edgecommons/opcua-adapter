@@ -4,7 +4,7 @@ The OPC UA adapter emits health and operational metrics through the EdgeCommons 
 `metricEmission.target: messaging`, metrics are published on the reserved UNS `metric` class:
 
 ```text
-ecv1/{device}/OpcUaAdapter/main/metric/{metricName}
+ecv1/{device}/OpcUaAdapter/metric/{metricName}
 ```
 
 The adapter never writes reserved `metric` topics directly. It defines metrics through `MetricEmitter`,

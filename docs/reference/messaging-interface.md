@@ -59,11 +59,11 @@ verb's argument object. A EdgeCommons client's `request()` API sets `header.name
 | Class | Message | Direction | Topic | Owner |
 |-------|---------|-----------|-------|-------|
 | `data` | `SouthboundSignalUpdate` | adapter → bus | `ecv1/{device}/{component}/{instance}/data/{signalPath}` | adapter, via `data()` |
-| `cmd` | `sb/*` verbs (below) | bus ↔ adapter | `ecv1/{device}/{component}/main/cmd/sb/{verb}` | library inbox |
+| `cmd` | `sb/*` verbs (below) | bus ↔ adapter | `ecv1/{device}/{component}/cmd/sb/{verb}` | library inbox |
 | `evt` | connection/write alarms | adapter → bus | `ecv1/{device}/{component}/{instance}/evt/{severity}/{type}` | adapter, via `events()` |
-| `metric` | `southbound_health`, `OpcUaCommand`, `OpcUaSubscription`, `OpcUaBrowse`, `OpcUaConnection` | adapter → bus | `ecv1/{device}/{component}/main/metric/{metricName}` | library (via `MetricEmitter`) |
-| `state` | keepalive | adapter → bus | `ecv1/{device}/{component}/main/state` | library (heartbeat) |
-| `cfg` | effective config | adapter → bus | `ecv1/{device}/{component}/main/cfg` | library |
+| `metric` | `southbound_health`, `OpcUaCommand`, `OpcUaSubscription`, `OpcUaBrowse`, `OpcUaConnection` | adapter → bus | `ecv1/{device}/{component}/metric/{metricName}` | library (via `MetricEmitter`) |
+| `state` | keepalive | adapter → bus | `ecv1/{device}/{component}/state` | library (heartbeat) |
+| `cfg` | effective config | adapter → bus | `ecv1/{device}/{component}/cfg` | library |
 
 - `{device}` is the resolved thing name (the last hierarchy level); `{component}` is `OpcUaAdapter`;
   `{instance}` is the device instance id (`instances[].id`). A fleet consumer subscribes the six UNS
@@ -75,8 +75,9 @@ verb's argument object. A EdgeCommons client's `request()` API sets `header.name
 - **`state`/`metric`/`cfg`/`log` are reserved** (library-owned): a component publishing to them
   directly is rejected. The adapter's metrics reach `metric/{metricName}` through the
   metric subsystem, not a raw publish.
-- **The command inbox is `main`-instance-only** (`ecv1/{device}/{component}/main/cmd/#`) — one per
-  component, not per device-instance. Multi-instance routing is by
+- **The command inbox is component-scope** (`ecv1/{device}/{component}/cmd/#`) — one per
+  component, not per device-instance; an instance token is optional and present only for explicit
+  multi-instance addressing. Multi-instance routing is by
   the request's `instance` field (see below).
 
 ## The command surface — `cmd/sb/*` verbs
@@ -377,13 +378,13 @@ Subscribe `ecv1/+/+/+/evt/#` for every adapter event, or `ecv1/+/+/+/evt/critica
 ## Metrics (`metric` class, reserved — automatic)
 
 The metric subsystem publishes health and OPC UA operational metrics on the reserved `metric` class
-(`ecv1/{device}/{component}/main/metric/{metricName}`) through `MetricEmitter`; the component never
+(`ecv1/{device}/{component}/metric/{metricName}`) through `MetricEmitter`; the component never
 addresses that topic itself. For every metric's dimensions, measures, units, and diagnostic purpose,
 see [Reference - Metrics](metrics.md).
 
 ## State keepalive (`state` class)
 
-The library heartbeat publishes a `state` keepalive to `ecv1/{device}/{component}/main/state` each
+The library heartbeat publishes a `state` keepalive to `ecv1/{device}/{component}/state` each
 tick (`state` is reserved/library-owned — the adapter never publishes it directly). On the
 **RUNNING** keepalive the adapter contributes a per-server connectivity view through the library's
 instance-connectivity provider: the body carries an `instances[]` array with **one entry per
