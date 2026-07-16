@@ -13,8 +13,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The component-level southbound command surface: registers the {@code cmd/sb/*} verb family
- * (docs/SOUTHBOUND.md §2.2) <b>once</b> on the library's single {@code main}-instance command inbox
- * ({@code ecv1/{device}/{component}/main/cmd/#}) and routes each request to the right
+ * (docs/SOUTHBOUND.md §2.2) <b>once</b> on the library's single component-scope command inbox
+ * ({@code ecv1/{device}/{component}/cmd/#}) and routes each request to the right
  * {@link OpcUaDevice} by its {@code instance} field.
  *
  * <p><b>Why component-level.</b> The shipped {@link CommandInbox} is one-per-component (per-instance

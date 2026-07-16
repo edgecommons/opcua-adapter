@@ -56,7 +56,7 @@ public class OpcUaAdapter {
         config = edgeCommons.getConfigManager();
         metrics = edgeCommons.getMetrics();
         credentials = edgeCommons.getCredentials();   // null when no 'credentials' config section
-        // The sb/* command verbs are registered once on the library's single main-instance command
+        // The sb/* command verbs are registered once on the library's single component-scope command
         // inbox and routed to the right device by the request's "instance" field.
         commandRegistry = new CommandRegistry(edgeCommons.getCommands());
     }

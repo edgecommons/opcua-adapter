@@ -64,6 +64,6 @@ java -jar target/OpcUaAdapter-1.0.0.jar \
 ```
 Needs a local MQTT broker (e.g. `docker run -d -p 1883:1883 emqx/emqx`). Subscribe to
 `ecv1/+/+/+/data/#` for signal updates (and `ecv1/+/+/+/state`, `ecv1/+/+/+/metric/#` for the
-keepalive and health); drive `ecv1/{thing}/opcua-adapter/main/cmd/sb/status` for status. See
+keepalive and health); drive `ecv1/{thing}/opcua-adapter/cmd/sb/status` for status. See
 [docs/](docs/) for configuration, the message interface, security, and the other deploy targets. A
 reproducible end-to-end smoke harness lives in [`validation/`](validation/).

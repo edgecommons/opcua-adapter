@@ -125,14 +125,14 @@ Keep `queueSize ≥ ceil(publishIntervalMs / samplingRateMs)` or the server disc
 **Goal:** read or write arbitrary signals on demand from a bus client, using the `cmd/sb/*` verbs.
 
 Both are request/reply on the component's UNS command inbox
-(`ecv1/{device}/opcua-adapter/main/cmd/sb/{verb}`), with the request's `header.name` equal to the verb
+(`ecv1/{device}/opcua-adapter/cmd/sb/{verb}`), with the request's `header.name` equal to the verb
 and a target `instance` in the body (optional when only one instance is connected). The reply body is
 `{ "ok": true, "result": … }` or `{ "ok": false, "error": {code,message} }`.
 
 **Write** — the target's stable `signal.id` must be in the instance's `writes.allow[]` (else it comes
 back `FAILED` and raises `evt/warning/write-rejected`):
 ```
-publish   topic: ecv1/<device>/opcua-adapter/main/cmd/sb/write
+publish   topic: ecv1/<device>/opcua-adapter/cmd/sb/write
           payload: { "header": { "name": "sb/write", "reply_to": "app/replies/write1", "correlation_id": "write1" },
                      "body": { "instance": "kep1",
                                "writes": [ { "namespaceUri": "urn:kepware:KEPServerEX", "signalId": "…Setpoint", "value": 42.5 } ] } }
@@ -142,7 +142,7 @@ subscribe topic: app/replies/write1   → { "ok": true, "result": { "id": "kep1"
 **Read** — select signals by an explicit list, or by regex `include`/`exclude` matchers (the same
 shape as `subscriptions[].include`/`exclude`) to read an ad-hoc set:
 ```
-publish   topic: ecv1/<device>/opcua-adapter/main/cmd/sb/read
+publish   topic: ecv1/<device>/opcua-adapter/cmd/sb/read
           payload: { "header": { "name": "sb/read", "reply_to": "app/replies/42", "correlation_id": "42" },
                      "body": { "instance": "kep1",
                                "signals": [ { "namespaceUri": "urn:kepware:KEPServerEX", "signalId": "…Counter" } ],
@@ -206,7 +206,7 @@ from the Downward API — typically no args). See the scaffold's `Dockerfile` an
   `MonitoredItemCount`, `OpcUaBrowse` tracks address-space browse volume/truncation, and
   `OpcUaConnection` tracks connection attempts, terminal failures, session disconnects/reconnects, and
   current `SessionConnected`.
-- **State keepalive:** the library publishes `ecv1/{device}/opcua-adapter/main/state` each heartbeat
+- **State keepalive:** the library publishes `ecv1/{device}/opcua-adapter/state` each heartbeat
   tick — subscribe `ecv1/+/+/+/state` to see the whole fleet's liveness.
 - **Per-server connectivity:** the RUNNING `state` keepalive carries `instances[]` — one
   `{ instance, connected, detail }` per configured OPC UA server (`detail` is the endpoint URL) — so
