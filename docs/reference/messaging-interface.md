@@ -82,10 +82,6 @@ verb's argument object. A EdgeCommons client's `request()` API sets `header.name
 
 ## The command surface — `cmd/sb/*` verbs
 
-**Breaking changes in this baseline:** `sb/subscriptions` is renamed to `sb/signals`; the non-standard
-error codes `UNKNOWN_INSTANCE`/`INSTANCE_REQUIRED`/`BAD_MATCHER`/`BAD_BROWSE_REF` are replaced by the
-standardized `NO_SUCH_INSTANCE`/`BAD_ARGS` family.
-
 The adapter registers its southbound verbs on the library command inbox. A request is a `cmd`
 envelope whose `header.name` equals the verb; a reply carries the responder's `identity` and a uniform
 body:

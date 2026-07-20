@@ -136,7 +136,8 @@
                + the bootstrap: code that cannot execute without a live OPC UA session (validated by
                `validation/` against KEPServerEX and by GG-lab smoke), not by the in-process unit suite.
                Every class that holds real, broker-free logic stays IN the gate and is unit-tested:
-               the command router + standardized error codes (CommandRouter), the health/staleness core
+               the command router + standardized error codes (CommandRouter), the command-wiring shell +
+               its client-free helpers (CommandRegistry, CommandCodec, Panels), the health/staleness core
                (HealthState), the metric families + emitters (HealthMetrics/OpcUaOperationalMetrics/
                ClientMetrics), the value/signal/browse codecs (ValueCodec/SignalMatching/CommandJson),
                and the config model (ServerConfiguration + config/*). Do NOT widen this to pass; add a
@@ -149,8 +150,14 @@
             <!-- Live Milo driver seam: the concrete OPC UA client, address-space browse, subscription
                  manager, the data()-publishing signal publisher, the per-instance device coordinator
                  (the live DeviceSession impl: reconnect/repoll/rescan touch the live session), and the
-                 CommandService read/write/browse handlers that call the Milo client directly. All need
-                 a live server + running EdgeCommons; validated on real infrastructure. -->
+                 CommandService read/write/browse/signals handlers — every remaining method calls the live
+                 OpcUaClient (browse / readValuesAsync / writeValues / getAddressSpace / getNamespaceTable)
+                 directly. All need a live server + running EdgeCommons; validated on real infrastructure.
+                 CommandService's client-free helpers (boundedInt, browseRootRef, mergeReadTargets,
+                 specsFromJson) were extracted to CommandCodec (in the gate, unit-tested), so nothing
+                 testable is hidden here. CommandRegistry is NOT excluded — its client-free parts are in
+                 the gate; only the register-on-the-live-inbox calls (needing a live CommandInbox) are
+                 uncovered, and the panel descriptors it registers live in Panels (in the gate, tested). -->
             <exclude>**/opc/OpcUaConnection.class</exclude>
             <exclude>**/opc/OpcUaConnection$*.class</exclude>
             <exclude>**/opc/OpcUaDevice.class</exclude>
@@ -163,9 +170,6 @@
             <exclude>**/opc/SignalUpdatePublisher$*.class</exclude>
             <exclude>**/opc/CommandService.class</exclude>
             <exclude>**/opc/CommandService$*.class</exclude>
-            <!-- Command inbox wiring + panel registration: needs a live CommandInbox; the routing/dispatch
-                 logic it delegates to (CommandRouter) is in the gate and unit-tested. -->
-            <exclude>**/opc/CommandRegistry.class</exclude>
             <!-- Security layer: cert/key loading, PKI trust lists, PKCS#11/HSM — validated with real
                  certs against a secure server, not in-process. -->
             <exclude>**/opc/security/**</exclude>

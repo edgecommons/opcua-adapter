@@ -152,8 +152,8 @@ public class CommandService {
 
     private JsonObject browseHierarchical(JsonObject reqBody) throws CommandException {
         NodeId rootId = browseRoot(reqBody);
-        int depth = boundedInt(reqBody, "depth", DEFAULT_TREE_DEPTH, 0, MAX_TREE_DEPTH);
-        int maxRefs = boundedInt(reqBody, "maxRefs", DEFAULT_TREE_MAX_REFS, 1, MAX_TREE_MAX_REFS);
+        int depth = CommandCodec.boundedInt(reqBody, "depth", DEFAULT_TREE_DEPTH, 0, MAX_TREE_DEPTH);
+        int maxRefs = CommandCodec.boundedInt(reqBody, "maxRefs", DEFAULT_TREE_MAX_REFS, 1, MAX_TREE_MAX_REFS);
         BrowseBudget budget = new BrowseBudget(maxRefs);
 
         JsonObject root = nodeObject(rootId);
@@ -171,46 +171,21 @@ public class CommandService {
         return result;
     }
 
-    static int boundedInt(JsonObject reqBody, String key, int defaultValue, int min, int max) {
-        if (reqBody == null || !reqBody.has(key) || reqBody.get(key).isJsonNull()) {
-            return defaultValue;
-        }
-        int value = reqBody.get(key).getAsInt();
-        return Math.max(min, Math.min(max, value));
-    }
-
     private NodeId browseRoot(JsonObject reqBody) throws CommandException {
         if (reqBody == null || !reqBody.has("ref") || reqBody.get("ref").isJsonNull()) {
             return NodeIds.RootFolder;
         }
         JsonElement ref = reqBody.get("ref");
         if (ref.isJsonObject()) {
+            // The object-form ref needs the live namespace table (nodeIdFrom) — resolved here, not in
+            // the client-free CommandCodec.
             try {
                 return nodeIdFrom(ref.getAsJsonObject());
             } catch (Exception e) {
                 throw new CommandException(CommandRouter.ERR_BAD_ARGS, "invalid browse ref object: " + e.getMessage());
             }
         }
-        // (kept below: a non-object ref string is parsed as a NodeId)
-        String value = ref.getAsString();
-        if (value == null || value.isBlank() || "root".equalsIgnoreCase(value)) {
-            return NodeIds.RootFolder;
-        }
-        if ("objects".equalsIgnoreCase(value)) {
-            return NodeIds.ObjectsFolder;
-        }
-        if ("types".equalsIgnoreCase(value)) {
-            return NodeIds.TypesFolder;
-        }
-        if ("views".equalsIgnoreCase(value)) {
-            return NodeIds.ViewsFolder;
-        }
-        try {
-            return NodeId.parse(value);
-        } catch (Exception e) {
-            throw new CommandException(CommandRouter.ERR_BAD_ARGS,
-                    "invalid browse ref '" + value + "'; use 'root' or a parseable NodeId such as ns=2;s=Channel.Device.Tag");
-        }
+        return CommandCodec.browseRootRef(ref.getAsString());
     }
 
     private void addHierarchicalRefs(JsonObject node, NodeId nodeId, int remainingDepth,
@@ -406,9 +381,9 @@ public class CommandService {
                 List<SignalSpec> includeSpecs;
                 List<SignalSpec> excludeSpecs;
                 try {
-                    includeSpecs = specsFromJson(payload.getAsJsonArray("include"));
+                    includeSpecs = CommandCodec.specsFromJson(payload.getAsJsonArray("include"));
                     excludeSpecs = payload.has("exclude")
-                            ? specsFromJson(payload.getAsJsonArray("exclude"))
+                            ? CommandCodec.specsFromJson(payload.getAsJsonArray("exclude"))
                             : List.of();
                     // Compile the caller-supplied regexes up front so a malformed pattern (or a non-object
                     // matcher entry) becomes a coded error reply instead of escaping to a HANDLER_ERROR.
@@ -444,7 +419,7 @@ public class CommandService {
                 }
             }
 
-            List<NodeId> nodeIds = mergeReadTargets(explicit, includeMatched);
+            List<NodeId> nodeIds = CommandCodec.mergeReadTargets(explicit, includeMatched);
             List<DataValue> values = nodeIds.isEmpty()
                     ? new ArrayList<>()
                     : client.readValuesAsync(0.0, TimestampsToReturn.Both, nodeIds).get();
@@ -611,29 +586,6 @@ public class CommandService {
         events.emit(Severity.WARNING, "write-rejected", "not in writes.allow[]", context);
     }
 
-    private static List<SignalSpec> specsFromJson(JsonArray array) {
-        List<SignalSpec> specs = new ArrayList<>();
-        for (JsonElement el : array) {
-            specs.add(SignalSpec.fromJson(el.getAsJsonObject()));
-        }
-        return specs;
-    }
-
-    /**
-     * The ordered read target list: the {@code explicit} signals[] as given (order and duplicates
-     * preserved), followed by {@code include}-matched node ids not already present (deduplicated
-     * against the explicit entries and against each other).
-     */
-    static List<NodeId> mergeReadTargets(List<NodeId> explicit, List<NodeId> includeMatched) {
-        List<NodeId> result = new ArrayList<>(explicit);
-        Set<NodeId> seen = new HashSet<>(explicit);
-        for (NodeId id : includeMatched) {
-            if (seen.add(id)) {
-                result.add(id);
-            }
-        }
-        return result;
-    }
 
     /**
      * Build a {@link NodeId} from a read/write request entry. The namespace is identified by

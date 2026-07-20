@@ -67,7 +67,7 @@ public class OpcUaAdapter {
         edgeCommons.setReady(false);
 
         // Register the southbound command surface before any device connects so a console can address
-        // it immediately (an as-yet-unconnected instance replies UNKNOWN_INSTANCE, never blocks).
+        // it immediately (an as-yet-unconnected instance replies NO_SUCH_INSTANCE, never blocks).
         commandRegistry.registerVerbs();
 
         // Report each configured OPC UA server's connectivity AT THE INSTANCE LEVEL via the component's
