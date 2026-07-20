@@ -6,7 +6,6 @@ import com.google.gson.JsonObject;
 import com.mbreissi.edgecommons.commands.CommandException;
 import com.mbreissi.edgecommons.facades.EventsFacade;
 import com.mbreissi.edgecommons.facades.Severity;
-import com.mbreissi.edgecommons.messaging.Message;
 import com.mbreissi.edgecommons.opcua.opc.config.ServerConfiguration;
 import com.mbreissi.edgecommons.opcua.opc.config.SignalSpec;
 import org.apache.logging.log4j.LogManager;
@@ -47,7 +46,8 @@ import static org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.
  * (docs/SOUTHBOUND.md §2.2): {@code sb/status}, {@code sb/browse} (hierarchical refs),
  * {@code sb/read}
  * (ref-accepting, regex include/exclude), {@code sb/write} (confirmed, allow-listed batch), and
- * {@code sb/subscriptions}. Each verb method returns the verb-specific <b>result object</b> — the
+ * {@code sb/signals} (the configured inventory + writable flag). Each verb method returns the
+ * verb-specific <b>result object</b> — the
  * library {@link com.mbreissi.edgecommons.commands.CommandInbox} wraps it as
  * {@code {"ok":true,"result":…}} and replies. A coded failure is a
  * {@link CommandException} ({@code {"ok":false,"error":{code,message}}}).
@@ -65,12 +65,6 @@ public class CommandService {
     private static final int DEFAULT_TREE_MAX_REFS = 500;
     private static final int MAX_TREE_MAX_REFS = 2000;
 
-    /** Error code: an {@code sb/read} {@code include}/{@code exclude} matcher was malformed. */
-    public static final String ERR_BAD_MATCHER = "BAD_MATCHER";
-
-    /** Error code: an {@code sb/browse} hierarchical root reference was malformed. */
-    public static final String ERR_BAD_BROWSE_REF = "BAD_BROWSE_REF";
-
     /** Status marker on an {@code sb/write} entry rejected by {@code writes.allow[]}. */
     private static final String WRITE_NOT_ALLOWED = "write not allowed by writes.allow[]";
 
@@ -81,10 +75,11 @@ public class CommandService {
     private final Supplier<Map<String, ResolvedSignal>> resolvedSignals;
     private final Map<NodeId, UaVariableNode> allNodes;
     private final EventsFacade events;
+    private final HealthState health;
 
     public CommandService(OpcUaClient client, ServerConfiguration serverConfig, ClientMetrics counters,
                           BooleanSupplier connected, Supplier<Map<String, ResolvedSignal>> resolvedSignals,
-                          Map<NodeId, UaVariableNode> allNodes, EventsFacade events) {
+                          Map<NodeId, UaVariableNode> allNodes, EventsFacade events, HealthState health) {
         this.client = client;
         this.serverConfig = serverConfig;
         this.counters = counters;
@@ -92,6 +87,7 @@ public class CommandService {
         this.resolvedSignals = resolvedSignals;
         this.allNodes = allNodes;
         this.events = events;
+        this.health = health;
     }
 
     // ---- sb/status -------------------------------------------------------------------------------
@@ -105,10 +101,14 @@ public class CommandService {
         return result;
     }
 
-    // ---- sb/subscriptions ------------------------------------------------------------------------
+    // ---- sb/signals ------------------------------------------------------------------------------
 
-    /** {@code sb/subscriptions}: the currently resolved/subscribed signals. Result {@code {id, signals}}. */
-    public JsonObject subscriptions() {
+    /**
+     * {@code sb/signals}: the configured signal inventory — the currently resolved/subscribed signals,
+     * each carrying its {@code writable} flag (whether the stable {@code signal.id} is in
+     * {@code writes.allow[]}). No device round-trip. Result {@code {id, signals}}.
+     */
+    public JsonObject signals() {
         JsonObject result = new JsonObject();
         result.addProperty("id", serverConfig.getId());
         JsonArray signals = new JsonArray();
@@ -123,6 +123,8 @@ public class CommandService {
                 t.addProperty("namespaceUri", uri);
             }
             t.addProperty("match", rt.spec().getMatch());
+            // The stable signal.id (parseable ns=…;…=… form, as published) is what writes.allow[] matches.
+            t.addProperty("writable", serverConfig.isWriteAllowed(rt.nodeId().toParseableString()));
             signals.add(t);
         });
         result.add("signals", signals);
@@ -136,10 +138,10 @@ public class CommandService {
      * {@code {ref?, depth?, maxRefs?}} returns {@code {id, mode:"hierarchical", root}} where each node
      * carries its outgoing hierarchical {@code refs}.
      */
-    public JsonObject browse(Message request) throws CommandException {
+    public JsonObject browse(JsonObject reqBody) throws CommandException {
         counters.recordBrowseRequest();
         try {
-            JsonObject result = browseHierarchical(asJsonObject(request));
+            JsonObject result = browseHierarchical(reqBody);
             counters.recordBrowseResult(result.get("refCount").getAsLong(), result.get("truncated").getAsBoolean());
             return result;
         } catch (CommandException | RuntimeException e) {
@@ -186,9 +188,10 @@ public class CommandService {
             try {
                 return nodeIdFrom(ref.getAsJsonObject());
             } catch (Exception e) {
-                throw new CommandException(ERR_BAD_BROWSE_REF, "invalid browse ref object: " + e.getMessage());
+                throw new CommandException(CommandRouter.ERR_BAD_ARGS, "invalid browse ref object: " + e.getMessage());
             }
         }
+        // (kept below: a non-object ref string is parsed as a NodeId)
         String value = ref.getAsString();
         if (value == null || value.isBlank() || "root".equalsIgnoreCase(value)) {
             return NodeIds.RootFolder;
@@ -205,7 +208,7 @@ public class CommandService {
         try {
             return NodeId.parse(value);
         } catch (Exception e) {
-            throw new CommandException(ERR_BAD_BROWSE_REF,
+            throw new CommandException(CommandRouter.ERR_BAD_ARGS,
                     "invalid browse ref '" + value + "'; use 'root' or a parseable NodeId such as ns=2;s=Channel.Device.Tag");
         }
     }
@@ -381,11 +384,12 @@ public class CommandService {
      * result {@code {id, reads:[{signal:{id,address}, value, quality, qualityRaw, sourceTs, serverTs}]}}.
      * {@code signals} names exact signals (order and duplicates preserved); {@code include} (with optional
      * {@code exclude}) selects signals by the same namespace + regex matching used for subscriptions.
-     * A malformed matcher throws {@link #ERR_BAD_MATCHER}.
+     * A malformed matcher throws {@code BAD_ARGS}. The read round-trip is recorded into
+     * {@code southbound_health.pollLatencyMs}.
      */
-    public JsonObject read(Message request) throws Exception {
+    public JsonObject read(JsonObject payload) throws Exception {
+        long started = System.nanoTime();
         try {
-            JsonObject payload = asJsonObject(request);
             JsonArray signals = (payload != null && payload.has("signals")) ? payload.getAsJsonArray("signals") : new JsonArray();
 
             List<NodeId> explicit = new ArrayList<>();
@@ -412,7 +416,7 @@ public class CommandService {
                     excludeSpecs.forEach(SignalSpec::pattern);
                 } catch (Exception e) {
                     LOGGER.warn("[{}] read include/exclude rejected: {}", serverConfig.getId(), e.toString());
-                    throw new CommandException(ERR_BAD_MATCHER, "invalid include/exclude: " + e.getMessage());
+                    throw new CommandException(CommandRouter.ERR_BAD_ARGS, "invalid include/exclude: " + e.getMessage());
                 }
                 NamespaceTable table = client.getNamespaceTable();
                 Map<SignalSpec, Integer> includeNs = new HashMap<>();
@@ -444,6 +448,11 @@ public class CommandService {
             List<DataValue> values = nodeIds.isEmpty()
                     ? new ArrayList<>()
                     : client.readValuesAsync(0.0, TimestampsToReturn.Both, nodeIds).get();
+            // Record the read round-trip for southbound_health.pollLatencyMs (this subscribe-model
+            // adapter's "poll" is an explicit read via sb/read / repoll).
+            if (health != null && !nodeIds.isEmpty()) {
+                health.setPollLatencyMs(Math.max(0L, (System.nanoTime() - started) / 1_000_000L));
+            }
 
             JsonArray reads = new JsonArray();
             for (int i = 0; i < nodeIds.size(); i++) {
@@ -479,8 +488,7 @@ public class CommandService {
      * {@code evt/warning/write-rejected} — the whole batch is not failed, so allowed writes still
      * proceed.
      */
-    public JsonObject write(Message request) {
-        JsonObject payload = asJsonObject(request);
+    public JsonObject write(JsonObject payload) {
         JsonArray writes;
         if (payload != null && payload.has("writes")) {
             writes = payload.getAsJsonArray("writes");
@@ -654,17 +662,5 @@ public class CommandService {
         }
         String idType = o.has("idType") ? o.get("idType").getAsString() : null;
         return ValueCodec.nodeId(ns, o.get("signalId").getAsString(), idType);
-    }
-
-    private static JsonObject asJsonObject(Message message) {
-        if (message == null) {
-            return null;
-        }
-        Object body = message.getBody();
-        if (body instanceof JsonObject) {
-            return (JsonObject) body;
-        }
-        Object raw = message.getRaw();
-        return raw instanceof JsonObject ? (JsonObject) raw : null;
     }
 }

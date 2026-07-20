@@ -91,6 +91,31 @@ public class OpcUaConnection {
         return client;
     }
 
+    /**
+     * Drop and re-establish the session on the <b>same</b> {@link OpcUaClient} (Milo owns the client's
+     * transport; only the session is cycled), one immediate attempt — backing the {@code reconnect}
+     * command verb. The {@code SessionActivityListener} attached in {@link #connect(Runnable)} records
+     * the reconnect and flips {@link #isConnected()} back to true on re-activation.
+     *
+     * @return {@code true} once reconnected
+     * @throws Exception when the immediate reconnect attempt fails (mapped to {@code RECONNECT_FAILED})
+     */
+    public boolean reconnect() throws Exception {
+        if (client == null) {
+            throw new IllegalStateException("no OPC UA client to reconnect");
+        }
+        try {
+            client.disconnect();
+        } catch (Exception closeError) {
+            LOGGER.debug("[{}] disconnect before reconnect failed: {}", config.getId(), closeError.toString());
+        }
+        connected = false;
+        client.connect();
+        connected = true;
+        LOGGER.info("[{}] reconnected to {}", config.getId(), config.getConnection().getEndpoint());
+        return true;
+    }
+
     /** Blocks, retrying every {@value #RETRY_MS} ms, until connected or a terminal failure is detected. */
     public OpcUaClient connect() {
         return connect(null);

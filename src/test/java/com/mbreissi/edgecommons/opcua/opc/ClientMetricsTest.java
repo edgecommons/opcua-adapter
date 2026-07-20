@@ -117,6 +117,42 @@ class ClientMetricsTest {
         assertEquals(7, afterReset.get("monitoredItemCount").getAsLong());
     }
 
+    @Test
+    void recordCommand_countsRequestsAndFailures_surfacedInCommandMeasures() {
+        ClientMetrics metrics = new ClientMetrics();
+        metrics.recordCommand(true);
+        metrics.recordCommand(true);
+        metrics.recordCommand(false);
+
+        JsonObject json = metrics.toJsonObject();
+        assertCounter(json.getAsJsonObject("commandRequest"), 3, 3);
+        assertCounter(json.getAsJsonObject("commandFailure"), 1, 1);
+
+        Map<String, Float> command = metrics.snapshot().toCommandMeasureValues();
+        assertEquals(Float.valueOf(3.0f), command.get("CommandRequestTotal"));
+        assertEquals(Float.valueOf(1.0f), command.get("CommandFailureTotal"));
+    }
+
+    @Test
+    void getIntervalReconnects_takesAndResets_independentOfOperationalReset() {
+        ClientMetrics metrics = new ClientMetrics();
+        metrics.recordSessionReconnect();
+        metrics.recordSessionReconnect();
+        // The health drain is separate from the operational-family interval drain.
+        assertEquals(2L, metrics.getIntervalReconnects());
+        assertEquals(0L, metrics.getIntervalReconnects());
+    }
+
+    @Test
+    void resetIntervals_clearsCommandIntervalsButKeepsTotals() {
+        ClientMetrics metrics = new ClientMetrics();
+        metrics.recordCommand(false);
+        metrics.resetIntervals();
+        JsonObject json = metrics.toJsonObject();
+        assertCounter(json.getAsJsonObject("commandRequest"), 1, 0);
+        assertCounter(json.getAsJsonObject("commandFailure"), 1, 0);
+    }
+
     private static void assertCounter(JsonObject counter, long total, long interval) {
         assertEquals(total, counter.get("total").getAsLong());
         assertEquals(interval, counter.get("interval").getAsLong());

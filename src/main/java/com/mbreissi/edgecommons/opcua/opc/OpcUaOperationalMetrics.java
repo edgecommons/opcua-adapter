@@ -43,6 +43,10 @@ public class OpcUaOperationalMetrics {
                 .addMeasure("WriteRequestInterval", "Count", 60)
                 .addMeasure("WriteFailureTotal", "Count", 60)
                 .addMeasure("WriteFailureInterval", "Count", 60)
+                .addMeasure("CommandRequestTotal", "Count", 60)
+                .addMeasure("CommandRequestInterval", "Count", 60)
+                .addMeasure("CommandFailureTotal", "Count", 60)
+                .addMeasure("CommandFailureInterval", "Count", 60)
                 .addDimension("instance", instanceId)
                 .build());
     }

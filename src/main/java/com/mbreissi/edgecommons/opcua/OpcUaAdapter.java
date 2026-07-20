@@ -8,6 +8,7 @@ import com.mbreissi.edgecommons.credentials.CredentialService;
 import com.mbreissi.edgecommons.heartbeat.InstanceConnectivity;
 import com.mbreissi.edgecommons.metrics.MetricEmitter;
 import com.mbreissi.edgecommons.opcua.opc.CommandRegistry;
+import com.mbreissi.edgecommons.opcua.opc.HealthState;
 import com.mbreissi.edgecommons.opcua.opc.OpcUaConnection;
 import com.mbreissi.edgecommons.opcua.opc.OpcUaDevice;
 import com.mbreissi.edgecommons.opcua.opc.config.ServerConfiguration;
@@ -89,6 +90,7 @@ public class OpcUaAdapter {
         });
 
         JsonObject globalConfig = config.getGlobalConfig();
+        long staleSignalSecs = staleSignalSecs(globalConfig);
         for (String instanceId : config.getInstanceIds()) {
             // Each device connection runs on its own thread: connect() blocks/retries until up.
             Thread worker = new Thread(() -> {
@@ -97,7 +99,7 @@ public class OpcUaAdapter {
                     // The per-message UNS instance token: mints this device's data/evt topics and stamps
                     // its identity. Uses the resolved instance id (= published device.instance).
                     OpcUaDevice device = new OpcUaDevice(edgeCommons.instance(serverConfig.getId()),
-                            config, metrics, credentials, serverConfig);
+                            config, metrics, credentials, serverConfig, staleSignalSecs);
                     synchronized (devices) {
                         devices.add(device);
                     }
@@ -120,5 +122,24 @@ public class OpcUaAdapter {
             Thread.currentThread().interrupt();
         }
         LOGGER.info("OPC UA adapter stopped");
+    }
+
+    /**
+     * Read {@code component.global.healthThresholds.staleSignalSecs} (SOUTHBOUND.md §5), defaulting to
+     * {@link HealthState#DEFAULT_STALE_SIGNAL_SECS} when unset or malformed.
+     */
+    static long staleSignalSecs(JsonObject globalConfig) {
+        try {
+            if (globalConfig != null && globalConfig.has("healthThresholds")
+                    && globalConfig.get("healthThresholds").isJsonObject()) {
+                JsonObject h = globalConfig.getAsJsonObject("healthThresholds");
+                if (h.has("staleSignalSecs") && h.get("staleSignalSecs").isJsonPrimitive()) {
+                    return h.get("staleSignalSecs").getAsLong();
+                }
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debug("staleSignalSecs lookup failed, defaulting: {}", e.toString());
+        }
+        return HealthState.DEFAULT_STALE_SIGNAL_SECS;
     }
 }

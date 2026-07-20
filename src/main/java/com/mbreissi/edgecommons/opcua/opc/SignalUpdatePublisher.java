@@ -48,17 +48,26 @@ public class SignalUpdatePublisher {
     private final EdgeCommonsInstance instance;
     private final ServerConfiguration serverConfig;
     private final NamespaceTable namespaceTable;
+    private final HealthState health;
     private final Map<UaVariableNode, Buffer> pending = new ConcurrentHashMap<>();
 
     public SignalUpdatePublisher(EdgeCommonsInstance instance, ServerConfiguration serverConfig,
-                                 NamespaceTable namespaceTable) {
+                                 NamespaceTable namespaceTable, HealthState health) {
         this.instance = instance;
         this.serverConfig = serverConfig;
         this.namespaceTable = namespaceTable;
+        this.health = health;
     }
 
-    /** Offer a value change for a signal — buffered (batch) or published immediately. */
+    /**
+     * Offer a value change for a signal — buffered (batch) or published immediately. While the instance
+     * is paused ({@code sb/pause}), value changes are dropped rather than published, so no telemetry
+     * leaves the adapter while it is suspended.
+     */
     public void offer(UaVariableNode node, SignalSpec spec, DataValue value) {
+        if (health != null && health.isPaused()) {
+            return;
+        }
         if (serverConfig.getBatchMs() > 0) {
             pending.computeIfAbsent(node, n -> new Buffer(spec)).queue.add(value);
         } else {
@@ -66,8 +75,11 @@ public class SignalUpdatePublisher {
         }
     }
 
-    /** Flush all buffered values (one message per node). Called on the batch timer. */
+    /** Flush all buffered values (one message per node). Called on the batch timer. A no-op while paused. */
     public void flush() {
+        if (health != null && health.isPaused()) {
+            return;
+        }
         pending.forEach((node, buffer) -> {
             List<DataValue> values = new ArrayList<>();
             buffer.queue.drainTo(values);
@@ -100,6 +112,7 @@ public class SignalUpdatePublisher {
         }
 
         try {
+            long started = System.nanoTime();
             instance.data().signal(signalId)
                     .name(!displayName.isEmpty() ? displayName : browseName)
                     .address(ValueCodec.address(node.getNodeId(), namespaceTable))
@@ -107,6 +120,12 @@ public class SignalUpdatePublisher {
                     .addSamples(samples)
                     .signalPath(signalPath)
                     .publish();
+            if (health != null) {
+                // Feed southbound_health: the publish round-trip, and the staleness tracker (a signal
+                // that keeps publishing is not stale). Keyed on the stable signal.id, as seeded.
+                health.setPublishLatencyMs(Math.max(0L, (System.nanoTime() - started) / 1_000_000L));
+                health.onSignalUpdate(signalId, System.nanoTime());
+            }
         } catch (UnsValidationException e) {
             // e.g. an identifier so long the total topic exceeds the IoT-Core 256-byte limit. Drop the
             // message rather than crash the flush loop; the stable signal.id still names it in a log.
