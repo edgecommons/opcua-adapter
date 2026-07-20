@@ -6,7 +6,7 @@
 # --platform auto the library detects KUBERNETES, defaults config to CONFIGMAP and transport to MQTT,
 # and resolves identity from the Downward API — so the container needs NO default args.
 
-# ---- Stage 1: build the shaded component jar (target/OpcUaAdapter-1.0.0.jar) ----
+# ---- Stage 1: build the shaded component jar (target/opcua-adapter-1.0.0.jar) ----
 FROM maven:3.9-eclipse-temurin-25 AS build
 WORKDIR /build
 COPY pom.xml ./
@@ -15,7 +15,7 @@ RUN mvn -q -DskipTests package
 
 # ---- Stage 2: minimal JRE runtime, non-root (UID 65532) ----
 FROM eclipse-temurin:25-jre
-COPY --from=build /build/target/OpcUaAdapter-1.0.0.jar /app/app.jar
+COPY --from=build /build/target/opcua-adapter-1.0.0.jar /app/app.jar
 USER 65532:65532
 # Run from a writable dir: the Java Paho client creates its file-persistence dir in the CWD, which
 # must be writable under runAsNonRoot + readOnlyRootFilesystem (k8s mounts a tmp emptyDir at /tmp).
