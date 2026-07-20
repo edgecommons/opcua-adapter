@@ -79,7 +79,7 @@ Three idioms follow from this:
 > it is server- and configuration-specific. For KEPServerEX it is commonly `Kepware Server` (used in
 > these examples and the adapter's `validation/` configs); the OPC UA Foundation base namespace is
 > `http://opcfoundation.org/UA/` (index 0). Discover the exact strings your server uses with the
-> [`subscriptions` control query](reference/messaging-interface.md#sbsubscriptions) — it
+> [`sb/signals` control query](reference/messaging-interface.md#sbsignals) — it
 > echoes the **resolved** `namespace` index and its `namespaceUri` for every subscribed signal — or by
 > reading the server's `NamespaceArray`. Always substitute your server's values.
 
@@ -172,7 +172,7 @@ here) or as a separate file passed positionally as `--transport MQTT ./messaging
 Run it:
 
 ```bash
-java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT \
+java -jar target/opcua-adapter-1.0.0.jar --platform HOST --transport MQTT \
   -c FILE ./config.json -t my-thing
 # (or, with a separate broker file: --transport MQTT ./messaging.json)
 ```
@@ -234,7 +234,7 @@ ComponentConfig:
 Run on-device (config comes from the deployment, so no `-c`):
 
 ```bash
-java -jar OpcUaAdapter-1.0.0.jar --platform GREENGRASS -t my-thing
+java -jar opcua-adapter-1.0.0.jar --platform GREENGRASS -t my-thing
 # package/publish: gdk component build && gdk component publish
 ```
 
@@ -438,7 +438,7 @@ What this achieves, signal by signal:
 | Option | Scope | Effect on runtime behavior |
 |--------|-------|----------------------------|
 | `subscriptions[]` | per group | Each entry is an independent OPC UA subscription with its **own `publishIntervalMs`**. Split signals by how fresh they must be so each group gets the cadence it needs without over-publishing the rest. |
-| `subscriptions[].id` | per group | Identifier used in logs and the `subscriptions` control query. Defaults to a random UUID — set it so logs are readable. |
+| `subscriptions[].id` | per group | Identifier used in logs and the `sb/signals` control query. Defaults to a random UUID — set it so logs are readable. |
 | `subscriptions[].publishIntervalMs` | per group | How often the **server delivers** that subscription's accumulated samples to the adapter. `200` ms → low latency; `10000` ms → cheap housekeeping. Overrides the instance/global default for this subscription only. |
 | `include[]` / `exclude[]` | per group | The matcher lists. A node is monitored iff it matches **some `include`** and **no `exclude`** — see [matching semantics](#include-vs-exclude-which-nodes-get-subscribed). `exclude` is optional. |
 | `namespaceUri` | per matcher | Pins the OPC UA namespace by its **URI** (preferred). Resolved to the server's current index at connect time and re-resolved on rebuild, so a server that renumbers after a restart is followed automatically. An unresolved URI skips the matcher (with a warning). |
@@ -562,13 +562,13 @@ CLI args** are needed.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: OpcUaAdapter-config
-  labels: { app.kubernetes.io/name: OpcUaAdapter }
+  name: opcua-adapter-config
+  labels: { app.kubernetes.io/name: opcua-adapter }
 data:
   config.json: |-
     {
       "messaging": {
-        "local": { "type": "mqtt", "host": "emqx.default.svc.cluster.local", "port": 1883, "clientId": "OpcUaAdapter" }
+        "local": { "type": "mqtt", "host": "emqx.default.svc.cluster.local", "port": 1883, "clientId": "opcua-adapter" }
       },
       "logging": { "level": "INFO" },
       "metricEmission": { "target": "prometheus" },

@@ -65,7 +65,7 @@ verb's argument object. A EdgeCommons client's `request()` API sets `header.name
 | `state` | keepalive | adapter → bus | `ecv1/{device}/{component}/state` | library (heartbeat) |
 | `cfg` | effective config | adapter → bus | `ecv1/{device}/{component}/cfg` | library |
 
-- `{device}` is the resolved thing name (the last hierarchy level); `{component}` is `OpcUaAdapter`;
+- `{device}` is the resolved thing name (the last hierarchy level); `{component}` is `opcua-adapter`;
   `{instance}` is the device instance id (`instances[].id`). A fleet consumer subscribes the six UNS
   wildcards (`ecv1/+/+/+/{state|cfg|evt|metric|data|log}`).
 - `{signalPath}` is the OPC UA node's bare identifier **sanitized to a single channel token**
@@ -82,6 +82,10 @@ verb's argument object. A EdgeCommons client's `request()` API sets `header.name
 
 ## The command surface — `cmd/sb/*` verbs
 
+**Breaking changes in this baseline:** `sb/subscriptions` is renamed to `sb/signals`; the non-standard
+error codes `UNKNOWN_INSTANCE`/`INSTANCE_REQUIRED`/`BAD_MATCHER`/`BAD_BROWSE_REF` are replaced by the
+standardized `NO_SUCH_INSTANCE`/`BAD_ARGS` family.
+
 The adapter registers its southbound verbs on the library command inbox. A request is a `cmd`
 envelope whose `header.name` equals the verb; a reply carries the responder's `identity` and a uniform
 body:
@@ -96,17 +100,21 @@ The reply's `header.name` is the verb (e.g. `sb/write`), with the request's `cor
 **Instance selector.** Because the inbox is one-per-component but the adapter is multi-instance, every
 `sb/*` request body may carry an **`"instance"`** field naming the target device instance. When exactly
 one instance is connected the field may be omitted (it defaults to that instance). With several
-connected, omitting it returns `INSTANCE_REQUIRED`; naming an unconnected/unknown instance returns
-`UNKNOWN_INSTANCE`.
+connected, omitting it returns `BAD_ARGS`; naming an unconnected/unknown instance (or when none is
+connected) returns `NO_SUCH_INSTANCE`.
 
 | Verb | Kind | Purpose |
 |------|------|---------|
-| `sb/status` | request/reply | instance/connection status + counters |
+| `sb/status` | request/reply | instance/connection status + counters (includes `paused`) |
 | `sb/browse` | request/reply | browse hierarchical address-space references |
 | `sb/read` | request/reply | on-demand read (explicit list and/or regex include/exclude) |
 | `sb/write` | request/reply, **confirmed** | allow-listed batch write, per-entry ack |
-| `sb/subscriptions` | request/reply | the currently resolved/subscribed signals |
+| `sb/signals` | request/reply | the currently resolved/subscribed signals (each with `writable`) |
 | `sb/rescan` | request/reply | re-browse the address space and refresh the node cache |
+| `sb/pause` | request/reply, **confirmed** | suspend publishing for the instance (idempotent) |
+| `sb/resume` | request/reply, **confirmed** | resume publishing for the instance (idempotent) |
+| `reconnect` | request/reply, **confirmed** | drop and re-establish the OPC UA session |
+| `repoll` | request/reply, **confirmed** | immediately read every subscribed signal and republish on `data` |
 
 The library also provides the built-in verbs `ping`, `reload-config`, and `get-configuration` on the
 same inbox (out of the box; not southbound-specific).
@@ -173,7 +181,7 @@ accepted):
 | `instance` | if >1 instance | target device instance id |
 | `namespaceUri` | preferred | namespace URI, resolved to the server's current index |
 | `ns` | or `namespaceUri` | literal namespace index (used when `namespaceUri` is absent) |
-| `signalId` | yes | node identifier (bare, as reported by `sb/browse`/`sb/subscriptions`) |
+| `signalId` | yes | node identifier (bare, as reported by `sb/browse`/`sb/signals`) |
 | `idType` | no (`String`) | identifier type — `Numeric` \| `String` \| `Guid` — needed to round-trip numeric/GUID node ids |
 | `value` | yes | coerced to the node's data type |
 | `status` | no (`GOOD`) | `GOOD` \| `BAD` \| `UNCERTAIN` |
@@ -235,7 +243,7 @@ duplicates preserved. Signals that cannot be resolved are omitted from `reads`, 
 ([configuration reference](configuration.md#signal-matcher-entries-of-include--exclude)). `include`
 tests identifier/browse/display name; `exclude` tests the identifier only. Nodes selected by `include`
 (and not excluded) are appended and deduplicated against the explicit list. A malformed matcher (bad
-regex or non-object entry) fails the request with a `BAD_MATCHER` error.
+regex or non-object entry) fails the request with a `BAD_ARGS` error.
 
 ```jsonc
 "body": { "instance": "kep1",
@@ -251,28 +259,38 @@ Request body `{ "instance": "kep1" }` (optional selector). Result:
 
 ```jsonc
 { "ok": true, "result": {
-    "id": "kep1", "connected": true,
+    "id": "kep1", "connected": true, "paused": false,
     "metrics": {
       "subscribedRead": { "interval": 1234, "total": 98765 },
       "readRequest": { "interval": 2, "total": 40 },
       "writeRequest": { "interval": 1, "total": 12 } } } }
 ```
-`connected` is the OPC UA session state. `subscribedRead` counts data-change samples from active
+`connected` is the OPC UA session state; `paused` is `true` while publishing is suspended for the
+instance (see `sb/pause`/`sb/resume`). `subscribedRead` counts data-change samples from active
 subscriptions, `readRequest` counts explicit `sb/read` samples returned, and `writeRequest` counts
 explicit `sb/write` attempts issued to the server. The status reply also includes the operational
 counters used by the OPC UA metric families below (`readFailure`, `writeFailure`, browse counters,
 subscription re-establishment counters, connection counters, `subscriptionCount`, and
 `monitoredItemCount`). `interval` counts reset each reporting cycle; `total` is lifetime.
 
-### `sb/subscriptions`
+### `sb/signals`
 
 Result lists the currently resolved/subscribed signals, each signal's `idType`, the **resolved**
-namespace index and its URI, and the matcher that selected it:
+namespace index and its URI, the matcher that selected it, and whether it is `writable`:
 
 ```jsonc
 { "ok": true, "result": { "id": "kep1", "signals": [ { "signalId": "…Sine1", "idType": "String", "namespace": 2,
-    "namespaceUri": "urn:kepware:KEPServerEX", "match": "^…Sine.*" } ] } }
+    "namespaceUri": "urn:kepware:KEPServerEX", "match": "^…Sine.*", "writable": false } ] } }
 ```
+
+| Field | Notes |
+|-------|-------|
+| `signalId` | bare node identifier |
+| `idType` | `Numeric` \| `String` \| `Guid` |
+| `namespace` | resolved namespace index |
+| `namespaceUri` | that namespace's URI, when resolvable |
+| `match` | the matcher that selected the signal |
+| `writable` | `true` iff the signal's stable `signal.id` is in the instance's `writes.allow[]` (i.e. `sb/write` may write it) |
 
 ### `sb/browse` (hierarchical refs)
 
@@ -346,6 +364,53 @@ NodeId such as `"ns=2;s=Channel1.Device1"`, or a normal command ref object with 
 
 Re-browses the server's address space and refreshes the node cache used by `sb/browse`/`sb/read` in
 place (live subscriptions are unaffected). Result `{ "id": "kep1", "total": <n>, "rescanned": true }`.
+
+### `sb/pause` (confirmed)
+
+Suspends publishing for the instance. The OPC UA subscriptions stay up on the server; value changes are
+dropped rather than forwarded while paused. Idempotent — pausing an already-paused instance succeeds and
+reports `changed: false`. Request body may carry the `instance` selector. Result:
+
+```jsonc
+{ "ok": true, "result": { "id": "kep1", "paused": true, "changed": true } }
+```
+
+`changed` is `true` only when this call moved the instance from running to paused.
+
+### `sb/resume` (confirmed)
+
+Resumes publishing for the instance. Idempotent — resuming an already-running instance succeeds and
+reports `changed: false`. Request body may carry the `instance` selector. Result:
+
+```jsonc
+{ "ok": true, "result": { "id": "kep1", "paused": false, "changed": true } }
+```
+
+`changed` is `true` only when this call moved the instance from paused to running.
+
+### `reconnect` (confirmed)
+
+Drops and re-establishes the OPC UA session, making one immediate connection attempt on the same Milo
+client. Request body may carry the `instance` selector. Result:
+
+```jsonc
+{ "ok": true, "result": { "id": "kep1", "connected": true } }
+```
+
+`connected` reflects the session state after the attempt. If the reconnect attempt fails the request
+returns error code `RECONNECT_FAILED`.
+
+### `repoll` (confirmed)
+
+Immediately reads every subscribed signal and republishes the results onto the `data` class — the
+subscribe-model adapter's "refresh now". Request body may carry the `instance` selector. Result:
+
+```jsonc
+{ "ok": true, "result": { "id": "kep1", "polled": 128 } }
+```
+
+`polled` is the number of signals read and republished. `repoll` is **refused while the instance is
+paused** with error code `BAD_ARGS`; if the OPC UA session is down it returns `DEVICE_UNAVAILABLE`.
 
 ## Events (`evt` class)
 

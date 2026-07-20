@@ -61,7 +61,7 @@ flowchart LR
     SRV["OPC UA server(s)<br/>opc.tcp://"]
     DEV["OPC UA Adapter<br/>one instance per server"]
     DP["<b>Data plane</b><br/>data class · sb/read · sb/write"]
-    CP["<b>Control plane</b><br/>sb/status · sb/subscriptions · sb/browse · evt · health"]
+    CP["<b>Control plane</b><br/>sb/status · sb/signals · sb/browse · evt · health"]
     SRV <-->|"browse · subscribe · read · write"| DEV
     DEV <--> DP
     DEV <--> CP
@@ -73,7 +73,7 @@ updates flowing out to the bus on the UNS **`data`** class
 `sb/read` / `sb/write` command verbs. This is the reason the adapter exists.
 
 The **control plane** carries management. It is low-volume and about the *adapter itself* rather than
-the process: "are you connected?" (`sb/status`), "what are you subscribed to?" (`sb/subscriptions`),
+the process: "are you connected?" (`sb/status`), "what are you subscribed to?" (`sb/signals`),
 "what's available on the server?" (`sb/browse`), the operator `evt` alarms, and the
 `southbound_health` / OPC UA operational metrics. A monitoring system lives here; a process historian
 lives on the data plane.

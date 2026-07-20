@@ -55,8 +55,10 @@ last level name — or not a declared level — is a startup error.
 | `defaults.publishIntervalMs` | number | `1000` | Fallback subscription publishing interval (ms). |
 | `defaults.samplingRateMs` | number | `0` | Fallback monitored-item sampling interval (ms); `0` = server's fastest. |
 | `defaults.queueSize` | number | `100` | Fallback monitored-item server-side queue size. |
+| `healthThresholds.staleSignalSecs` | integer (min `1`) | `30` | A subscribed signal with no update for longer than this many seconds counts toward `southbound_health.staleSignals`. |
 
-These are overridden by an instance's own `defaults`.
+The `defaults.*` values are overridden by an instance's own `defaults`. `healthThresholds` is
+component-wide.
 
 ## `component.instances[]`
 
@@ -151,7 +153,7 @@ A non-allow-listed write is confirmed `FAILED` and raises `evt/warning/write-rej
 
 | Key | Type | Default | Definition |
 |-----|------|---------|-----------|
-| `id` | string | random UUID | Subscription id (logs and the `sb/subscriptions` query). |
+| `id` | string | random UUID | Subscription id (logs and the `sb/signals` query). |
 | `publishIntervalMs` | number | instance default | This subscription's OPC UA publishing interval. |
 | `include` | array | `[]` | Signal matchers to subscribe to (below). |
 | `exclude` | array | `[]` | Signal matchers to skip (below). |
@@ -231,9 +233,6 @@ setting.
 
 These keys are ignored (documented to prevent misplaced trust):
 
-- `component.global.healthThresholds.staleSignalSecs` and a `staleSignals` health measure — the
-  `southbound_health` metric emits `connectionState`, `readErrors`, and `writeErrors`; OPC UA
-  command/subscription/browse/connection counters are emitted as separate operational metric families.
 - `connection.trust.autoTrustServerCert` — there is no auto-trust; trust the server certificate
   explicitly.
 - a signal matcher's `topic` key — addressing is UNS-minted, so per-signal topic overrides are not
