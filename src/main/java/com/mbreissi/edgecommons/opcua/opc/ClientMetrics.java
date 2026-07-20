@@ -38,10 +38,18 @@ public class ClientMetrics {
     private long sessionDisconnectInterval = 0L;
     private long sessionReconnectTotal = 0L;
     private long sessionReconnectInterval = 0L;
+    private long commandRequestTotal = 0L;
+    private long commandRequestInterval = 0L;
+    private long commandFailureTotal = 0L;
+    private long commandFailureInterval = 0L;
     private long subscriptionCount = 0L;
     private long monitoredItemCount = 0L;
     private long readErrors = 0L;
     private long writeErrors = 0L;
+    // Reconnect tally for southbound_health.reconnects (§5 optional), drained by HealthMetrics on its own
+    // cadence — kept separate from sessionReconnectInterval (drained by the OpcUaConnection family) so the
+    // two emitters never race on one counter.
+    private long healthReconnectInterval = 0L;
 
     public synchronized void resetIntervals() {
         subscribedReadInterval = 0L;
@@ -59,6 +67,8 @@ public class ClientMetrics {
         terminalFailureInterval = 0L;
         sessionDisconnectInterval = 0L;
         sessionReconnectInterval = 0L;
+        commandRequestInterval = 0L;
+        commandFailureInterval = 0L;
     }
 
     public synchronized void recordSubscribedRead() {
@@ -138,6 +148,24 @@ public class ClientMetrics {
     public synchronized void recordSessionReconnect() {
         sessionReconnectTotal++;
         sessionReconnectInterval++;
+        healthReconnectInterval++;
+    }
+
+    /** Record one {@code sb/*} command outcome for the {@code OpcUaCommand} family's command counters. */
+    public synchronized void recordCommand(boolean ok) {
+        commandRequestTotal++;
+        commandRequestInterval++;
+        if (!ok) {
+            commandFailureTotal++;
+            commandFailureInterval++;
+        }
+    }
+
+    /** Returns and resets the reconnect count for {@code southbound_health.reconnects} (interval measure). */
+    public synchronized long getIntervalReconnects() {
+        long r = healthReconnectInterval;
+        healthReconnectInterval = 0L;
+        return r;
     }
 
     /**
@@ -197,6 +225,8 @@ public class ClientMetrics {
                 new Counter(terminalFailureTotal, terminalFailureInterval),
                 new Counter(sessionDisconnectTotal, sessionDisconnectInterval),
                 new Counter(sessionReconnectTotal, sessionReconnectInterval),
+                new Counter(commandRequestTotal, commandRequestInterval),
+                new Counter(commandFailureTotal, commandFailureInterval),
                 subscriptionCount,
                 monitoredItemCount);
     }
@@ -232,6 +262,8 @@ public class ClientMetrics {
             Counter terminalFailure,
             Counter sessionDisconnect,
             Counter sessionReconnect,
+            Counter commandRequest,
+            Counter commandFailure,
             long subscriptionCount,
             long monitoredItemCount) {
 
@@ -252,6 +284,8 @@ public class ClientMetrics {
             retVal.add("terminalFailure", terminalFailure.toJsonObject());
             retVal.add("sessionDisconnect", sessionDisconnect.toJsonObject());
             retVal.add("sessionReconnect", sessionReconnect.toJsonObject());
+            retVal.add("commandRequest", commandRequest.toJsonObject());
+            retVal.add("commandFailure", commandFailure.toJsonObject());
             retVal.addProperty("subscriptionCount", subscriptionCount);
             retVal.addProperty("monitoredItemCount", monitoredItemCount);
             return retVal;
@@ -263,6 +297,8 @@ public class ClientMetrics {
             addMeasures(retVal, "ReadFailure", readFailure);
             addMeasures(retVal, "WriteRequest", writeRequest);
             addMeasures(retVal, "WriteFailure", writeFailure);
+            addMeasures(retVal, "CommandRequest", commandRequest);
+            addMeasures(retVal, "CommandFailure", commandFailure);
             return retVal;
         }
 

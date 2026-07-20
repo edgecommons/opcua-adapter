@@ -4,7 +4,7 @@ The OPC UA adapter emits health and operational metrics through the EdgeCommons 
 `metricEmission.target: messaging`, metrics are published on the reserved UNS `metric` class:
 
 ```text
-ecv1/{device}/OpcUaAdapter/metric/{metricName}
+ecv1/{device}/opcua-adapter/metric/{metricName}
 ```
 
 The adapter never writes reserved `metric` topics directly. It defines metrics through `MetricEmitter`,
@@ -22,24 +22,38 @@ Use data messages, events, logs, or command replies for those details.
 
 ## `southbound_health`
 
-Small compatibility health metric for per-instance connection state and read/write errors.
+The canonical southbound health metric: per-instance connection state, publish/poll latency, and
+read/stale/reconnect/write counters.
 
 Dimensions: `instance`.
 
-| Measure | Unit | Purpose |
-|---|---:|---|
-| `connectionState` | Count | `1` connected, `0` disconnected. Helps drive simple per-server health alarms. |
-| `readErrors` | Count | Read errors observed during the reporting interval. Helps identify failing explicit reads. |
-| `writeErrors` | Count | Write errors observed during the reporting interval. Helps identify rejected or failed control writes. |
+| Measure | Unit | Res | Meaning |
+|---|---:|---:|---|
+| `connectionState` | Count | 1 | `1` = OPC UA session up, `0` = down. |
+| `publishLatencyMs` | Milliseconds | 1 | Last northbound publish round-trip (from the `data()` publish). |
+| `pollLatencyMs` | Milliseconds | 1 | Last explicit-read round-trip (`repoll` / `sb/read`). |
+| `readErrors` | Count | 60 | Read errors over the interval. |
+| `staleSignals` | Count | 60 | Subscribed signals with no update for longer than `component.global.healthThresholds.staleSignalSecs` (default 30 seconds). |
+| `reconnects` | Count | 60 | Session reconnects over the interval. |
+| `writeErrors` | Count | 60 | Write errors over the interval. |
+
+`staleSignals` counts each subscribed signal whose most recent update is older than
+`component.global.healthThresholds.staleSignalSecs` (default 30 seconds); see
+[configuration reference](configuration.md#componentglobal).
 
 ## `OpcUaCommand`
 
-Explicit `sb/read` and `sb/write` command activity.
+`sb/*` command activity: the whole command surface (every verb) plus explicit `sb/read` and `sb/write`
+detail.
 
 Dimensions: `instance`.
 
 | Measure | Unit | Purpose |
 |---|---:|---|
+| `CommandRequestTotal` | Count | Lifetime count of all `sb/*` command requests across every verb. Helps quantify command-plane demand. |
+| `CommandRequestInterval` | Count | All `sb/*` command requests in the interval. Helps build current command-rate dashboards. |
+| `CommandFailureTotal` | Count | Lifetime count of failed `sb/*` command requests across every verb. Helps identify persistent command-plane problems. |
+| `CommandFailureInterval` | Count | Failed `sb/*` command requests in the interval. Helps alert on active command failures. |
 | `ReadRequestTotal` | Count | Lifetime explicit `sb/read` samples returned. Helps quantify command-plane read demand. |
 | `ReadRequestInterval` | Count | Explicit `sb/read` samples returned in the interval. Helps build current read-rate dashboards. |
 | `ReadFailureTotal` | Count | Lifetime failed `sb/read` command requests. Helps identify persistent explicit-read problems. |

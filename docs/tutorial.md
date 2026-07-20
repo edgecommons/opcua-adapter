@@ -25,7 +25,7 @@ Run everything from the repository root.
 ```bash
 mvn -q clean package
 ```
-You should get `target/OpcUaAdapter-1.0.0.jar`.
+You should get `target/opcua-adapter-1.0.0.jar`.
 
 ## Step 2 — Start a message broker
 
@@ -51,7 +51,7 @@ Leave it running. It serves a few changing signals (`Sine1`, `Sine2`, `Counter`)
 In another terminal, point the adapter at the simulator and the broker using the bundled config:
 
 ```bash
-java -jar target/OpcUaAdapter-1.0.0.jar \
+java -jar target/opcua-adapter-1.0.0.jar \
   --platform HOST --transport MQTT validation/messaging-local.json \
   -c FILE validation/config.json -t tutorial-thing
 ```

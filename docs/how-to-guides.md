@@ -178,13 +178,13 @@ Split them **downstream** instead:
 
 **HOST (Docker / bare host):**
 ```bash
-java -jar target/OpcUaAdapter-1.0.0.jar --platform HOST --transport MQTT ./messaging.json \
+java -jar target/opcua-adapter-1.0.0.jar --platform HOST --transport MQTT ./messaging.json \
   -c FILE ./config.json -t my-thing
 ```
 
 **Greengrass (on-device):** config comes from the deployment; transport is IPC.
 ```bash
-java -jar target/OpcUaAdapter-1.0.0.jar --platform GREENGRASS -c GG_CONFIG -t my-thing
+java -jar target/opcua-adapter-1.0.0.jar --platform GREENGRASS -c GG_CONFIG -t my-thing
 # package: gdk component build && gdk component publish
 ```
 
@@ -214,7 +214,7 @@ from the Downward API — typically no args). See the scaffold's `Dockerfile` an
   the passive counterpart to `sb/status`.
 - **Status query:** `sb/status` verb → `{ id, connected, metrics }`, where `metrics` has the same
   per-instance counters used by the operational metric families.
-- **Subscriptions query:** `sb/subscriptions` verb → the resolved signal list.
+- **Subscriptions query:** `sb/signals` verb → the resolved signal list.
 - **Browse query:** `sb/browse` verb → hierarchical address-space references from a requested root
   (id, namespace, name, node class, reference type, data type where known) — for discovering what's
   available to subscribe to, read, or write, independent of what's currently configured. `sb/rescan`

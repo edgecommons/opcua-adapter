@@ -1,56 +1,19 @@
 package com.mbreissi.edgecommons.opcua.opc;
 
-import com.google.gson.JsonObject;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+/**
+ * The remaining CommandService-adjacent pure checks: the OPC UA node-id round-trip through
+ * {@link ValueCodec} that read/write refs depend on. (The client-free command helpers moved to
+ * {@link CommandCodec}; the client-touching read/write/browse engine is validated by {@code validation/}
+ * against a real server.)
+ */
 class CommandServiceTest {
-
-    // ---- sb/browse hierarchy bounds --------------------------------------------------------------
-
-    @Test
-    void boundedInt_clampsTreeLimits() {
-        JsonObject request = new JsonObject();
-        request.addProperty("depth", 99);
-        assertEquals(4, CommandService.boundedInt(request, "depth", 1, 0, 4));
-        request.addProperty("depth", -3);
-        assertEquals(0, CommandService.boundedInt(request, "depth", 1, 0, 4));
-    }
-
-    // ---- mergeReadTargets (read explicit + include dedup) ----------------------------------------
-
-    @Test
-    void mergeReadTargets_explicitOnly_preservesOrderAndDuplicates() {
-        NodeId x = new NodeId(2, "X");
-        NodeId y = new NodeId(2, "Y");
-        // A duplicated explicit signalId must stay duplicated (explicit-only path == pre-change).
-        List<NodeId> result = CommandService.mergeReadTargets(List.of(x, x, y), List.of());
-        assertEquals(List.of(x, x, y), result);
-    }
-
-    @Test
-    void mergeReadTargets_includeDedupedAgainstExplicitAndAppendedAfter() {
-        NodeId x = new NodeId(2, "X");
-        NodeId y = new NodeId(2, "Y");
-        NodeId z = new NodeId(2, "Z");
-        // X is already explicit → include's X is dropped; new include nodes append in order.
-        List<NodeId> result = CommandService.mergeReadTargets(List.of(x), List.of(x, y, z));
-        assertEquals(List.of(x, y, z), result);
-    }
-
-    @Test
-    void mergeReadTargets_includeDedupedAmongThemselves() {
-        NodeId y = new NodeId(2, "Y");
-        List<NodeId> result = CommandService.mergeReadTargets(List.of(), List.of(y, y));
-        assertEquals(List.of(y), result);
-    }
-
-    // ---- ValueCodec node-id round-trip (idType) --------------------------------------------------
 
     @Test
     void nodeId_numeric_roundTripsThroughBareIdentifierAndIdType() {

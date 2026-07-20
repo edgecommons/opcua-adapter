@@ -3,10 +3,13 @@
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.mbreissi.edgecommons.opcua</groupId>
-  <artifactId>OpcUaAdapter</artifactId>
+  <!-- Kebab artifact naming (DESIGN-cli-scaffold-parity §A.1): artifactId/jar are kebab-case
+       `opcua-adapter`; the Greengrass component name stays PascalCase reverse-DNS
+       (com.mbreissi.edgecommons.OpcUaAdapter, in recipe.yaml/gdk-config.json). -->
+  <artifactId>opcua-adapter</artifactId>
   <packaging>jar</packaging>
   <version>1.0.0</version>
-  <name>OpcUaAdapter</name>
+  <name>opcua-adapter</name>
   <url>http://maven.apache.org</url>
 
   <properties>
@@ -15,6 +18,11 @@
     <maven.compiler.target>25</maven.compiler.target>
     <junitVersion>5.9.2</junitVersion>
     <mavenPluginVersion>3.5.1</mavenPluginVersion>
+    <jacocoPluginVersion>0.8.15</jacocoPluginVersion>
+    <!-- The org gate (AGENTS.md / core/CLAUDE.md): 90% line coverage, enforced by `mvn verify` via
+         the jacoco `check` goal below. Don't lower this or exclude testable code to pass it — add
+         tests. The excludes scope out ONLY the live Milo driver seam (see the jacoco config). -->
+    <jacoco.line.minimum>0.90</jacoco.line.minimum>
     <!-- LOCAL DEV OVERRIDE SEAM (the Maven analog of the bridge's gitignored .cargo/config.toml
          `[patch]`): Maven resolves a dependency by coordinate, so there is no "path dependency" —
          the local-dev equivalent is `mvn install` on the SIBLING checkout (../core/libs/java)
@@ -116,6 +124,92 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <version>3.2.5</version>
+      </plugin>
+      <plugin>
+        <!-- The org 90% line-coverage gate (AGENTS.md). `mvn verify` (what CI's reusable workflow
+             runs) fails the build if line coverage drops below jacoco.line.minimum. -->
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>${jacocoPluginVersion}</version>
+        <configuration>
+          <!-- Coverage-gate scope. The ONLY things excluded are the thin live Eclipse Milo driver seam
+               + the bootstrap: code that cannot execute without a live OPC UA session (validated by
+               `validation/` against KEPServerEX and by GG-lab smoke), not by the in-process unit suite.
+               Every class that holds real, broker-free logic stays IN the gate and is unit-tested:
+               the command router + standardized error codes (CommandRouter), the command-wiring shell +
+               its client-free helpers (CommandRegistry, CommandCodec, Panels), the health/staleness core
+               (HealthState), the metric families + emitters (HealthMetrics/OpcUaOperationalMetrics/
+               ClientMetrics), the value/signal/browse codecs (ValueCodec/SignalMatching/CommandJson),
+               and the config model (ServerConfiguration + config/*). Do NOT widen this to pass; add a
+               test instead (AGENTS.md: "don't lower a gate or exclude testable code to pass — add
+               tests"). -->
+          <excludes>
+            <!-- Bootstrap: main() + EdgeCommonsBuilder wiring + per-instance worker fan-out. -->
+            <exclude>**/opcua/OpcUaAdapter.class</exclude>
+            <exclude>**/opcua/OpcUaAdapter$*.class</exclude>
+            <!-- Live Milo driver seam: the concrete OPC UA client, address-space browse, subscription
+                 manager, the data()-publishing signal publisher, the per-instance device coordinator
+                 (the live DeviceSession impl: reconnect/repoll/rescan touch the live session), and the
+                 CommandService read/write/browse/signals handlers — every remaining method calls the live
+                 OpcUaClient (browse / readValuesAsync / writeValues / getAddressSpace / getNamespaceTable)
+                 directly. All need a live server + running EdgeCommons; validated on real infrastructure.
+                 CommandService's client-free helpers (boundedInt, browseRootRef, mergeReadTargets,
+                 specsFromJson) were extracted to CommandCodec (in the gate, unit-tested), so nothing
+                 testable is hidden here. CommandRegistry is NOT excluded — its client-free parts are in
+                 the gate; only the register-on-the-live-inbox calls (needing a live CommandInbox) are
+                 uncovered, and the panel descriptors it registers live in Panels (in the gate, tested). -->
+            <exclude>**/opc/OpcUaConnection.class</exclude>
+            <exclude>**/opc/OpcUaConnection$*.class</exclude>
+            <exclude>**/opc/OpcUaDevice.class</exclude>
+            <exclude>**/opc/OpcUaDevice$*.class</exclude>
+            <exclude>**/opc/AddressSpaceBrowser.class</exclude>
+            <exclude>**/opc/AddressSpaceBrowser$*.class</exclude>
+            <exclude>**/opc/SubscriptionManager.class</exclude>
+            <exclude>**/opc/SubscriptionManager$*.class</exclude>
+            <exclude>**/opc/SignalUpdatePublisher.class</exclude>
+            <exclude>**/opc/SignalUpdatePublisher$*.class</exclude>
+            <exclude>**/opc/CommandService.class</exclude>
+            <exclude>**/opc/CommandService$*.class</exclude>
+            <!-- Security layer: cert/key loading, PKI trust lists, PKCS#11/HSM — validated with real
+                 certs against a secure server, not in-process. -->
+            <exclude>**/opc/security/**</exclude>
+          </excludes>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>test</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>check</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>LINE</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>${jacoco.line.minimum}</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

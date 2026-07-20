@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://docs.edgecommons.mbreissi.com/schemas/opcua-adapter/config.schema.json",
+  "title": "opcua-adapter component configuration",
+  "description": "The configuration the OPC UA adapter itself understands: the object at `component.global`, with each entry of `component.instances[]` validated against `#/$defs/device`. A southbound adapter models ONE OPC UA SERVER PER INSTANCE — how to reach it, how to secure the channel, which signals to subscribe, and what it is permitted to write. See docs/SOUTHBOUND.md for the contract this implements and docs/reference/configuration.md for the full prose. The library envelope (logging, messaging, metricEmission, heartbeat, credentials, parameters, health, hierarchy, identity, topic, tags) is owned by the canonical schema and is deliberately not redeclared here.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Subscription defaults applied to every signal matcher (and every instance) that does not override them.",
+      "properties": {
+        "publishIntervalMs": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1000,
+          "description": "Default OPC UA subscription publish interval, in milliseconds. Also the fallback for `publish.batchMs`."
+        },
+        "samplingRateMs": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "description": "Default monitored-item sampling interval, in milliseconds (0 lets the server choose)."
+        },
+        "queueSize": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 100,
+          "description": "Default monitored-item queue size."
+        }
+      }
+    },
+    "healthThresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Thresholds feeding the `southbound_health` metric (SOUTHBOUND.md §5).",
+      "properties": {
+        "staleSignalSecs": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30,
+          "description": "A subscribed signal with no update for longer than this many seconds counts toward `southbound_health.staleSignals`. A signal that silently stops updating is otherwise indistinguishable from one that is simply not changing — which is why staleness is measured rather than assumed."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "device": {
+      "title": "One OPC UA server",
+      "description": "One entry of `component.instances[]`. Each server gets its own connection lifecycle, subscriptions, and command routing (addressed by `id`).",
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "connection"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique instance id. It is the `{instance}` token of this server's UNS topics and the `instance` dimension of its health metric, and the routing key for `sb/*` commands, so it must be stable."
+        },
+        "adapter": {
+          "type": "string",
+          "default": "opcua",
+          "description": "The protocol backend. Published in the `device.adapter` field of every SouthboundSignalUpdate."
+        },
+        "connection": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["endpoint"],
+          "description": "How to reach the server. Deliberately OPEN — a secure connection adds a certificate source (`vault`/`file`/`pkcs11`) and an identity `user` block, documented in docs/reference/configuration.md and the security how-to.",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The OPC UA endpoint URL, e.g. `opc.tcp://host:4840/`. Published in the `device.endpoint` field."
+            },
+            "securityPolicy": {
+              "type": "string",
+              "default": "None",
+              "description": "Milo SecurityPolicy enum name, e.g. `None` or `Basic256Sha256`. `None` is anonymous/unencrypted; anything else requests a secure channel."
+            },
+            "messageMode": {
+              "type": "string",
+              "enum": ["None", "Sign", "SignAndEncrypt"],
+              "default": "None",
+              "description": "Milo MessageSecurityMode for a secure channel."
+            },
+            "user": {
+              "type": "object",
+              "description": "Optional UserName identity token — inline (`{username, password}`) or vault-backed (`{source:\"vault\", secret:\"…\"}`). Absent = anonymous.",
+              "additionalProperties": true
+            }
+          }
+        },
+        "defaults": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-instance override of `component.global.defaults`.",
+          "properties": {
+            "publishIntervalMs": { "type": "number", "exclusiveMinimum": 0 },
+            "samplingRateMs": { "type": "number", "minimum": 0 },
+            "queueSize": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "publish": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Publish batching. The data-plane topic is UNS-minted (SOUTHBOUND.md §2.0), never a config template.",
+          "properties": {
+            "batchMs": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Buffer window (ms) for coalescing a signal's value changes into one message. 0 publishes each change immediately. Defaults to the resolved `publishIntervalMs`."
+            }
+          }
+        },
+        "writes": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The write allow-list (D‑U16).",
+          "properties": {
+            "allow": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "default": [],
+              "description": "Stable signal ids (`ns=<ns>;<type>=<id>` parseable form, as published) that `sb/write` may write, or the wildcard `\"*\"`. Anything not listed is refused, whatever a command asks for. An empty list — the default — means the adapter is read-only, the correct posture for anything touching a control system."
+            }
+          }
+        },
+        "subscriptions": {
+          "type": "array",
+          "description": "The OPC UA subscriptions this server serves. Each is a publish interval plus include/exclude signal matchers.",
+          "items": { "$ref": "#/$defs/subscription" }
+        }
+      }
+    },
+    "subscription": {
+      "title": "One OPC UA subscription",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Subscription id (a random id is used when omitted)."
+        },
+        "publishIntervalMs": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Subscription publish interval (ms). Defaults to the resolved instance `publishIntervalMs`."
+        },
+        "include": {
+          "type": "array",
+          "description": "Signal matchers to subscribe to.",
+          "items": { "$ref": "#/$defs/signalMatcher" }
+        },
+        "exclude": {
+          "type": "array",
+          "description": "Signal matchers to skip (applied after `include`).",
+          "items": { "$ref": "#/$defs/signalMatcher" }
+        }
+      }
+    },
+    "signalMatcher": {
+      "title": "A signal matcher",
+      "description": "Selects nodes by namespace + regex. The namespace is identified by `namespaceUri` (preferred — resolved to the server's current index at runtime) or a literal `namespace` index.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "namespace": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Literal namespace index; used only when `namespaceUri` is absent."
+        },
+        "namespaceUri": {
+          "type": "string",
+          "description": "Namespace URI (preferred), resolved to the server's current index at runtime."
+        },
+        "match": {
+          "type": "string",
+          "default": ".*",
+          "description": "Regex applied to the node identifier, browse name, or display name (identifier only, for `exclude`)."
+        },
+        "topic": {
+          "type": "string",
+          "description": "Optional legacy per-signal topic override (the data-plane topic is otherwise UNS-minted)."
+        },
+        "samplingRateMs": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Per-matcher monitored-item sampling interval (ms). Defaults to the resolved instance `samplingRateMs`."
+        },
+        "queueSize": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-matcher monitored-item queue size. Defaults to the resolved instance `queueSize`."
+        },
+        "deadband": { "$ref": "#/$defs/deadband" }
+      }
+    },
+    "deadband": {
+      "title": "A monitored-item deadband",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["None", "Absolute", "Percent"],
+          "default": "None",
+          "description": "Deadband type."
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "description": "Deadband magnitude (absolute units, or percent for `Percent`)."
+        }
+      }
+    }
+  }
+}
