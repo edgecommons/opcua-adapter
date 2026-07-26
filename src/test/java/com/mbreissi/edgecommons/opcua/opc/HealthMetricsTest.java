@@ -17,7 +17,7 @@ class HealthMetricsTest {
 
     private static final String[] REQUIRED = {
             "connectionState", "publishLatencyMs", "pollLatencyMs", "readErrors", "staleSignals",
-            "reconnects", "writeErrors",
+            "reconnects", "writeErrors", "signalsSubscribed",
     };
 
     @Test
@@ -69,6 +69,25 @@ class HealthMetricsTest {
         assertEquals(0.0f, second.get("readErrors"));
         assertEquals(0.0f, second.get("writeErrors"));
         assertEquals(0.0f, second.get("reconnects"));
+    }
+
+    @Test
+    void signalsSubscribed_isTheMonitoredItemGaugeWhileConnected_andZeroWhileDisconnected() {
+        ClientMetrics counters = new ClientMetrics();
+        HealthState health = new HealthState();
+        TestMetrics.Capturing emitter = new TestMetrics.Capturing();
+        HealthMetrics metrics = new HealthMetrics(emitter, TestMetrics.config(), "kep1", counters, health, 30);
+
+        counters.setSubscriptionShape(2, 17);
+
+        metrics.emit(true);
+        assertEquals(17.0f, emitter.emitted.get("southbound_health").get("signalsSubscribed"));
+
+        // A gauge, not an interval counter: it does not drain, and reads 0 while disconnected.
+        metrics.emit(true);
+        assertEquals(17.0f, emitter.emitted.get("southbound_health").get("signalsSubscribed"));
+        metrics.emit(false);
+        assertEquals(0.0f, emitter.emitted.get("southbound_health").get("signalsSubscribed"));
     }
 
     @Test

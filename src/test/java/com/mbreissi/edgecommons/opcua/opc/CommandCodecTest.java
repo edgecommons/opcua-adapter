@@ -28,13 +28,18 @@ class CommandCodecTest {
 
     @Test
     void boundedInt_clampsAndDefaults() {
+        // The SOUTHBOUND.md §2.2 hierarchical-browse clamp ranges: depth 1..4, maxRefs 1..1000.
         JsonObject req = new JsonObject();
-        assertEquals(1, CommandCodec.boundedInt(req, "depth", 1, 0, 4)); // absent -> default
+        assertEquals(1, CommandCodec.boundedInt(req, "depth", 1, 1, 4)); // absent -> default
         req.addProperty("depth", 99);
-        assertEquals(4, CommandCodec.boundedInt(req, "depth", 1, 0, 4)); // clamp high
+        assertEquals(4, CommandCodec.boundedInt(req, "depth", 1, 1, 4)); // clamp high
         req.addProperty("depth", -3);
-        assertEquals(0, CommandCodec.boundedInt(req, "depth", 1, 0, 4)); // clamp low
-        assertEquals(7, CommandCodec.boundedInt(null, "depth", 7, 0, 4)); // null body -> default
+        assertEquals(1, CommandCodec.boundedInt(req, "depth", 1, 1, 4)); // clamp low
+        assertEquals(7, CommandCodec.boundedInt(null, "depth", 7, 1, 4)); // null body -> default
+        req.addProperty("maxRefs", 5000);
+        assertEquals(1000, CommandCodec.boundedInt(req, "maxRefs", 500, 1, 1000)); // clamp high
+        req.addProperty("maxRefs", 0);
+        assertEquals(1, CommandCodec.boundedInt(req, "maxRefs", 500, 1, 1000)); // clamp low
     }
 
     // ---- browseRootRef ---------------------------------------------------------------------------

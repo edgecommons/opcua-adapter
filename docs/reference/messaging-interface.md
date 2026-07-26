@@ -296,8 +296,8 @@ references. `ref` may be `"root"` (default), `"objects"`, `"types"`, `"views"`, 
 NodeId such as `"ns=2;s=Channel1.Device1"`, or a normal command ref object with `namespaceUri`/`ns`,
 `signalId`, and optional `idType`.
 
-`depth` defaults to `1` and is clamped to `0..4`. `maxRefs` defaults to `500` and is clamped to
-`1..2000`; when the adapter has to stop before returning every requested descendant, `truncated` is
+`depth` defaults to `1` and is clamped to `1..4`. `maxRefs` defaults to `500` and is clamped to
+`1..1000`; when the adapter has to stop before returning every requested descendant, `truncated` is
 `true`.
 
 ```jsonc
@@ -406,7 +406,7 @@ subscribe-model adapter's "refresh now". Request body may carry the `instance` s
 ```
 
 `polled` is the number of signals read and republished. `repoll` is **refused while the instance is
-paused** with error code `BAD_ARGS`; if the OPC UA session is down it returns `DEVICE_UNAVAILABLE`.
+paused** with error code `PAUSED`; if the OPC UA session is down it returns `DEVICE_UNAVAILABLE`.
 
 ## Events (`evt` class)
 

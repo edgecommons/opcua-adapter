@@ -33,7 +33,7 @@ public final class Panels {
                         "sb/status", "reconnect", "sb/pause", "sb/resume", "repoll")));
         out.add(panel("address-space", "Address Space", 20,
                 treeBrowserWidget("address-space-tree", "Address space",
-                        "sb/browse", "sb/read", "sb/write")));
+                        "sb/browse", "sb/read")));
         out.add(panel("signals", "Signals", 30,
                 signalGridWidget("configured-signals", "Configured signals", "sb/signals", "sb/read")));
         out.add(panel("diagnostics", "Diagnostics", 40,
@@ -80,16 +80,16 @@ public final class Panels {
         return widget;
     }
 
+    // No `writeVerb` on the treeBrowser: the guarded-write console flow does not exist, so a panel
+    // descriptor must not advertise it (writes stay available on the wire via cmd/sb/write).
     private static JsonObject treeBrowserWidget(String id, String title,
-                                                String browseVerb, String readVerb,
-                                                String writeVerb) {
+                                                String browseVerb, String readVerb) {
         JsonObject widget = baseWidget("treeBrowser", id, title);
         widget.addProperty("scope", "instance");
         widget.addProperty("mode", "hierarchical");
         widget.addProperty("rootRef", "root");
         widget.addProperty("browseVerb", browseVerb);
         widget.addProperty("readVerb", readVerb);
-        widget.addProperty("writeVerb", writeVerb);
         return widget;
     }
 

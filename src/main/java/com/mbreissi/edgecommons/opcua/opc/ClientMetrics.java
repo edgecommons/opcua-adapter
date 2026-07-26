@@ -125,6 +125,11 @@ public class ClientMetrics {
         this.monitoredItemCount = Math.max(0L, monitoredItemCount);
     }
 
+    /** The resolved monitored-item count — the {@code southbound_health.signalsSubscribed} gauge source. */
+    public synchronized long getMonitoredItemCount() {
+        return monitoredItemCount;
+    }
+
     public synchronized void recordConnectionAttempt() {
         connectionAttemptTotal++;
         connectionAttemptInterval++;
@@ -187,6 +192,9 @@ public class ClientMetrics {
         readErrors++;
     }
 
+    /** Count one DEVICE-PATH write failure toward {@code southbound_health.writeErrors} (an entry that
+     *  passed validation + the allow-list and then failed at the server or was aborted by an unavailable
+     *  session — never a policy refusal or caller error). */
     public synchronized void incrementWriteErrors() {
         writeErrors++;
     }
