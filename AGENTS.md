@@ -15,8 +15,11 @@ chart an OPC UA node without knowing the protocol. One OPC UA **server** is one
 ## The shape (the seam you implement)
 
 The component-level `CommandRegistry` registers the `sb/*` verbs once on the library command inbox
-(the inbox is one-per-component; this adapter is multi-instance). The **pure `CommandRouter`** routes
-each request to a device by its `instance` field, enforces the standardized error-code family, shapes
+via `registerScoped` (the inbox is one-per-component, subscribes both D-U28 command scopes, and hands
+handlers the delivery topic's `{instance}` token; this adapter is multi-instance). The **pure
+`CommandRouter`** routes each request to a device — the topic-addressed instance is authoritative
+(a conflicting `body.instance` is `BAD_ARGS`); component-scoped requests route by the `instance`
+body field — enforces the standardized error-code family, shapes
 the lifecycle-verb replies, and records the `OpcUaCommand` metric — all against the **`DeviceSession`**
 seam, so the whole dispatch/routing/lifecycle contract is unit-tested with a fake session, no live
 server. `OpcUaDevice` is the live `DeviceSession`: it owns the Milo client (`OpcUaConnection`), the
@@ -84,7 +87,10 @@ schema and are not redeclared here. See `docs/reference/configuration.md` and
   (`state`, `metric`, `cfg`, `log`) are library-owned — publish through `data()`/`events()`, never a
   hand-built topic or envelope.
 - **Southbound contract:** a data point is a **signal**, not a tag. Quality is normalized to
-  `GOOD | BAD | UNCERTAIN` with the native OPC UA `StatusCode` preserved in `qualityRaw`.
+  `GOOD | BAD | UNCERTAIN` with the native OPC UA `StatusCode` preserved in `qualityRaw`. Timestamps
+  follow the SOUTHBOUND.md §2 four-slot model: OPC UA SourceTimestamp → `sourceTs`, ServerTimestamp →
+  `serverTs`, and the adapter-receive moment rides as the additive per-sample `receivedTs` extra when
+  it differs from `serverTs` (captured at receive, not publish — batching diverges them).
 - **Writes are allow-listed** by stable `signal.id`, checked before any device I/O. An empty
   `writes.allow` means read-only — the correct default for anything touching a control system.
 - **Kebab artifact naming:** the Maven `artifactId`/jar, the `recipe.yaml` artifact URI + Run script,

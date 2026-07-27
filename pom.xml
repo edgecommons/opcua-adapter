@@ -29,7 +29,7 @@
          into your local ~/.m2, then pointing this property at whatever version that installs as
          (`mvn -Dedgecommons.version=<sibling-version> package`). Maven's local-repo-first resolution
          means GitHub Packages is never contacted for a version already in ~/.m2. -->
-    <edgecommons.version>0.3.0</edgecommons.version>
+    <edgecommons.version>0.4.0</edgecommons.version>
   </properties>
 
   <dependencies>

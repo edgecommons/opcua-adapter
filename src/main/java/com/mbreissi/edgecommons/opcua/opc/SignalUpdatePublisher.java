@@ -12,6 +12,7 @@ import org.eclipse.milo.opcua.sdk.client.nodes.UaVariableNode;
 import org.eclipse.milo.opcua.stack.core.NamespaceTable;
 import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -60,18 +61,21 @@ public class SignalUpdatePublisher {
     }
 
     /**
-     * Offer a value change for a signal — buffered (batch) or published immediately. While the instance
-     * is paused ({@code sb/pause}), value changes are dropped rather than published, so no telemetry
-     * leaves the adapter while it is suspended.
+     * Offer a value change for a signal — buffered (batch) or published immediately. The
+     * adapter-receive moment ({@code receivedTs}, SOUTHBOUND.md §2's four-slot model) is captured
+     * <b>here</b>, not at publish — under batching the two diverge. While the instance is paused
+     * ({@code sb/pause}), value changes are dropped rather than published, so no telemetry leaves
+     * the adapter while it is suspended.
      */
     public void offer(UaVariableNode node, SignalSpec spec, DataValue value) {
         if (health != null && health.isPaused()) {
             return;
         }
+        Received received = new Received(value, Instant.now());
         if (serverConfig.getBatchMs() > 0) {
-            pending.computeIfAbsent(node, n -> new Buffer(spec)).queue.add(value);
+            pending.computeIfAbsent(node, n -> new Buffer(spec)).queue.add(received);
         } else {
-            publish(node, List.of(value));
+            publish(node, List.of(received));
         }
     }
 
@@ -81,7 +85,7 @@ public class SignalUpdatePublisher {
             return;
         }
         pending.forEach((node, buffer) -> {
-            List<DataValue> values = new ArrayList<>();
+            List<Received> values = new ArrayList<>();
             buffer.queue.drainTo(values);
             if (!values.isEmpty()) {
                 publish(node, values);
@@ -89,7 +93,7 @@ public class SignalUpdatePublisher {
         });
     }
 
-    private void publish(UaVariableNode node, List<DataValue> values) {
+    private void publish(UaVariableNode node, List<Received> values) {
         if (values.isEmpty()) {
             return;
         }
@@ -107,8 +111,8 @@ public class SignalUpdatePublisher {
         String signalPath = ConfigManager.sanitize(node.getNodeId().getIdentifier().toString());
 
         List<SignalUpdate.Sample> samples = new ArrayList<>(values.size());
-        for (DataValue value : values) {
-            samples.add(ValueCodec.toSampleParts(value));
+        for (Received received : values) {
+            samples.add(ValueCodec.toSampleParts(received.value(), received.receivedAt()));
         }
 
         try {
@@ -134,9 +138,13 @@ public class SignalUpdatePublisher {
         }
     }
 
+    /** One received value change: the OPC UA {@link DataValue} + the adapter-receive moment. */
+    private record Received(DataValue value, Instant receivedAt) {
+    }
+
     private static final class Buffer {
         final SignalSpec spec;
-        final LinkedBlockingQueue<DataValue> queue = new LinkedBlockingQueue<>();
+        final LinkedBlockingQueue<Received> queue = new LinkedBlockingQueue<>();
 
         Buffer(SignalSpec spec) {
             this.spec = spec;

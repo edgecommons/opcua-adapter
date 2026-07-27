@@ -35,7 +35,7 @@ class ValueCodecTest {
         Instant server = Instant.parse("2026-07-06T18:00:00Z");
         DataValue value = dataValue(ByteString.of(payload), source, server);
 
-        SignalUpdate.Sample sample = ValueCodec.toSampleParts(value);
+        SignalUpdate.Sample sample = ValueCodec.toSampleParts(value, null);
 
         assertArrayEquals(payload, assertInstanceOf(byte[].class, sample.value()));
         assertEquals(Quality.GOOD, sample.quality());
@@ -49,13 +49,89 @@ class ValueCodecTest {
         Instant server = Instant.parse("2026-07-06T18:00:00Z");
         DataValue value = new DataValue(new Variant(42), StatusCode.GOOD, null, new DateTime(server));
 
-        SignalUpdate.Sample sample = ValueCodec.toSampleParts(value);
-        JsonObject json = ValueCodec.toSample(value);
+        SignalUpdate.Sample sample = ValueCodec.toSampleParts(value, null);
+        JsonObject json = ValueCodec.toSample(value, null);
 
         assertNull(sample.sourceTs());
         assertEquals(server.toString(), sample.serverTs());
         assertFalse(json.has("sourceTs"));
         assertEquals(server.toString(), json.get("serverTs").getAsString());
+    }
+
+    // ---- the four-slot timestamp model: SourceTimestamp→sourceTs, ServerTimestamp→serverTs,
+    // ---- adapter receive → the additive receivedTs extra (SOUTHBOUND.md §2) ----------------------
+
+    @Test
+    void toSampleParts_mapsSourceAndServerTimestampSlotsExactly_neverCrossed() {
+        Instant source = Instant.parse("2026-07-06T17:59:59.900Z");
+        Instant server = Instant.parse("2026-07-06T18:00:00Z");
+        DataValue value = new DataValue(new Variant(1), StatusCode.GOOD,
+                new DateTime(source), new DateTime(server));
+
+        SignalUpdate.Sample sample = ValueCodec.toSampleParts(value, null);
+
+        // Milo SourceTimestamp → sourceTs, Milo ServerTimestamp → serverTs — exactly, never swapped.
+        assertEquals(source.toString(), sample.sourceTs());
+        assertEquals(server.toString(), sample.serverTs());
+    }
+
+    @Test
+    void toSampleParts_attachesReceivedTsExtra_whenItDiffersFromServerTs() {
+        Instant server = Instant.parse("2026-07-06T18:00:00Z");
+        Instant receivedAt = Instant.parse("2026-07-06T18:00:00.042Z");
+        DataValue value = new DataValue(new Variant(1), StatusCode.GOOD, null, new DateTime(server));
+
+        SignalUpdate.Sample sample = ValueCodec.toSampleParts(value, receivedAt);
+
+        assertEquals(server.toString(), sample.serverTs());
+        assertEquals(receivedAt.toString(), sample.extra().get("receivedTs"));
+    }
+
+    @Test
+    void toSampleParts_omitsReceivedTs_whenItEqualsServerTs() {
+        Instant server = Instant.parse("2026-07-06T18:00:00Z");
+        DataValue value = new DataValue(new Variant(1), StatusCode.GOOD, null, new DateTime(server));
+
+        SignalUpdate.Sample sample = ValueCodec.toSampleParts(value, server);
+
+        assertNull(sample.extra());
+    }
+
+    @Test
+    void toSampleParts_attachesReceivedTs_whenTheServerSuppliedNoServerTs() {
+        Instant receivedAt = Instant.parse("2026-07-06T18:00:00.042Z");
+        DataValue value = new DataValue(new Variant(1), StatusCode.GOOD, null, null);
+
+        SignalUpdate.Sample sample = ValueCodec.toSampleParts(value, receivedAt);
+
+        // serverTs stays null (the facade defaults it at publish); the receive moment still rides.
+        assertNull(sample.serverTs());
+        assertEquals(receivedAt.toString(), sample.extra().get("receivedTs"));
+    }
+
+    @Test
+    void toSample_json_carriesReceivedTsUnderTheSameRules() {
+        Instant server = Instant.parse("2026-07-06T18:00:00Z");
+        Instant receivedAt = Instant.parse("2026-07-06T18:00:00.042Z");
+        DataValue value = new DataValue(new Variant(1), StatusCode.GOOD, null, new DateTime(server));
+
+        JsonObject differs = ValueCodec.toSample(value, receivedAt);
+        assertEquals(receivedAt.toString(), differs.get("receivedTs").getAsString());
+        assertEquals(server.toString(), differs.get("serverTs").getAsString());
+
+        JsonObject equal = ValueCodec.toSample(value, server);
+        assertFalse(equal.has("receivedTs"));
+
+        JsonObject none = ValueCodec.toSample(value, null);
+        assertFalse(none.has("receivedTs"));
+    }
+
+    @Test
+    void toSampleParts_receivedTsExtra_survivesTheDataFacadeReservedKeyCheck() {
+        // receivedTs is additive (SOUTHBOUND.md §2) — not one of the facade's reserved canonical
+        // sample keys, so the extra passes the build-time rejection.
+        assertFalse(com.mbreissi.edgecommons.facades.DataFacade.RESERVED_SAMPLE_EXTRA_KEYS
+                .contains("receivedTs"));
     }
 
     @Test
@@ -64,7 +140,7 @@ class ValueCodecTest {
         DataValue value = dataValue(ByteString.of(payload), Instant.parse("2026-07-06T17:59:59Z"),
                 Instant.parse("2026-07-06T18:00:00Z"));
 
-        JsonObject sample = ValueCodec.toSample(value);
+        JsonObject sample = ValueCodec.toSample(value, null);
         JsonObject marker = sample.getAsJsonObject("value").getAsJsonObject("_edgecommonsBinary");
 
         assertEquals("base64", marker.get("encoding").getAsString());
@@ -82,7 +158,7 @@ class ValueCodecTest {
         JsonObject signal = new JsonObject();
         signal.addProperty("id", "ns=2;s=ByteStringNode");
         JsonArray samples = new JsonArray();
-        samples.add(ValueCodec.toSample(value));
+        samples.add(ValueCodec.toSample(value, null));
         JsonObject body = new JsonObject();
         body.add("signal", signal);
         body.add("samples", samples);
@@ -125,14 +201,14 @@ class ValueCodecTest {
         assertEquals(when.toString(), sampleValueOf(new Variant(new DateTime(when))).getAsString());
 
         JsonObject arr = ValueCodec.toSample(new DataValue(new Variant(new int[]{1, 2, 3}),
-                StatusCode.GOOD, null, null));
+                StatusCode.GOOD, null, null), null);
         assertEquals(3, arr.getAsJsonArray("value").size());
         assertEquals(2, arr.getAsJsonArray("value").get(1).getAsInt());
     }
 
     @Test
     void toSample_nullValue_encodesJsonNull_andQualityRaw() {
-        JsonObject sample = ValueCodec.toSample(new DataValue(Variant.NULL_VALUE, StatusCode.BAD, null, null));
+        JsonObject sample = ValueCodec.toSample(new DataValue(Variant.NULL_VALUE, StatusCode.BAD, null, null), null);
         assertEquals("BAD", sample.get("quality").getAsString());
         assertEquals(StatusCode.BAD.toString(), sample.get("qualityRaw").getAsString());
     }
@@ -258,7 +334,7 @@ class ValueCodecTest {
     }
 
     private static com.google.gson.JsonElement sampleValueOf(Variant v) {
-        return ValueCodec.toSample(new DataValue(v, StatusCode.GOOD, null, null)).get("value");
+        return ValueCodec.toSample(new DataValue(v, StatusCode.GOOD, null, null), null).get("value");
     }
 
     private static DataValue dataValue(ByteString value, Instant source, Instant server) {
