@@ -242,13 +242,13 @@ class CommandRouterTest {
     }
 
     @Test
-    void repoll_whilePaused_isBadArgs() {
+    void repoll_whilePaused_isPaused() {
         CommandRouter router = new CommandRouter();
         FakeSession s = new FakeSession("kep1");
         s.paused = true;
         router.addDevice(s);
         CommandException e = assertThrows(CommandException.class, () -> router.repoll(new JsonObject()));
-        assertEquals(CommandRouter.ERR_BAD_ARGS, e.getCode());
+        assertEquals(CommandRouter.ERR_PAUSED, e.getCode());
         assertEquals(1, s.commandsFailed);
     }
 

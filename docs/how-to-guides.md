@@ -197,7 +197,8 @@ from the Downward API — typically no args). See the scaffold's `Dockerfile` an
 
 **Goal:** know whether the adapter is connected and working.
 
-- **Health metric** `southbound_health` (`connectionState`, `readErrors`, `writeErrors`) flows to your
+- **Health metric** `southbound_health` (`connectionState`, latency, error, and `signalsSubscribed`
+  measures — see the [metrics reference](reference/metrics.md#southbound_health)) flows to your
   `metricEmission.target` (log / messaging → UNS `metric` class / CloudWatch / Prometheus).
 - **Operational metrics** `OpcUaCommand`, `OpcUaSubscription`, `OpcUaBrowse`, and `OpcUaConnection`
   flow to the same target with per-instance command, subscription, browse, and connection counters.

@@ -22,8 +22,8 @@ Use data messages, events, logs, or command replies for those details.
 
 ## `southbound_health`
 
-The canonical southbound health metric: per-instance connection state, publish/poll latency, and
-read/stale/reconnect/write counters.
+The canonical southbound health metric: per-instance connection state, publish/poll latency, the
+read/stale/reconnect/write counters, and the subscribed-signal gauge.
 
 Dimensions: `instance`.
 
@@ -35,7 +35,8 @@ Dimensions: `instance`.
 | `readErrors` | Count | 60 | Read errors over the interval. |
 | `staleSignals` | Count | 60 | Subscribed signals with no update for longer than `component.global.healthThresholds.staleSignalSecs` (default 30 seconds). |
 | `reconnects` | Count | 60 | Session reconnects over the interval. |
-| `writeErrors` | Count | 60 | Write errors over the interval. |
+| `writeErrors` | Count | 60 | `sb/write` entries that failed on the **device path** over the interval: the entry passed validation and the `writes.allow[]` allow-list and was then rejected by the server or aborted by an unavailable session. Allow-list refusals and caller errors (missing values, unresolvable refs, bad value types) are not counted — they surface in `OpcUaCommand.WriteFailure*`. |
+| `signalsSubscribed` | Count | 1 | Gauge: the number of signals the instance's session currently serves (the resolved monitored-item count); `0` while disconnected. |
 
 `staleSignals` counts each subscribed signal whose most recent update is older than
 `component.global.healthThresholds.staleSignalSecs` (default 30 seconds); see

@@ -30,20 +30,25 @@ from Eclipse Milo's client.
 
 ## The `sb/*` command family (docs/SOUTHBOUND.md §2.2)
 
-`sb/status` (adds `paused`), `sb/browse` (paged hierarchical), `sb/read` (ref-accepting, regex
+`sb/status` (adds `paused`), `sb/browse` (hierarchical, `depth` 1..4 / `maxRefs` 1..1000 clamped),
+`sb/read` (ref-accepting, regex
 include/exclude), `sb/write` (confirmed, allow-listed batch), `sb/signals` (configured inventory +
 `writable` flag), `sb/rescan`, plus the lifecycle-control family `sb/pause` / `sb/resume` (idempotent
 `{paused, changed}`), `reconnect` (`{connected}`), and `repoll` (`{polled}` — an immediate explicit
-read + republish; refused while paused with `BAD_ARGS`). Standardized error codes: `NO_SUCH_INSTANCE`,
-`BAD_ARGS`, `WRITE_NOT_ALLOWED`, `RECONNECT_FAILED`, `DEVICE_UNAVAILABLE`. **These are wire-visible
-strings** — a change here is a breaking wire change (see `DESIGN.md`'s register). Keep the command
-surface consistent with `docs/reference/messaging-interface.md`.
+read + republish; refused while paused with `PAUSED`). Standardized error codes: `NO_SUCH_INSTANCE`,
+`BAD_ARGS`, `PAUSED`, `WRITE_NOT_ALLOWED`, `RECONNECT_FAILED`, `DEVICE_UNAVAILABLE`. **These are
+wire-visible strings** — a change here is a breaking wire change (see `DESIGN.md`'s register). Keep the
+command surface consistent with `docs/reference/messaging-interface.md`.
 
 ## Metrics (docs/reference/metrics.md)
 
-`southbound_health` carries **exactly** the SOUTHBOUND.md §5 set: `connectionState`,
-`publishLatencyMs`, `pollLatencyMs`, `readErrors`, `staleSignals`, plus the §5-optional `reconnects`
-and `writeErrors`. `staleSignals` is driven by `component.global.healthThresholds.staleSignalSecs`
+`southbound_health` carries **exactly** the SOUTHBOUND.md §5 eight-measure set: `connectionState`,
+`publishLatencyMs`, `pollLatencyMs`, `readErrors`, `staleSignals`, `reconnects`, `writeErrors`, and
+`signalsSubscribed`. `writeErrors` counts **device-path** failures only (an entry that passed
+validation + `writes.allow[]` and then failed at the server or was aborted by an unavailable session —
+policy refusals and caller errors do not count, mirroring `readErrors`). `signalsSubscribed` is a
+gauge: the monitored-item count the session currently serves while connected, 0 while disconnected.
+`staleSignals` is driven by `component.global.healthThresholds.staleSignalSecs`
 (default 30) via `HealthState`'s per-signal last-update tracker. The operational families
 (`OpcUaCommand` — including the `CommandRequest*`/`CommandFailure*` counters, `OpcUaSubscription`,
 `OpcUaBrowse`, `OpcUaConnection`) use `(total, interval)` pairs dimensioned by `instance` only — keep

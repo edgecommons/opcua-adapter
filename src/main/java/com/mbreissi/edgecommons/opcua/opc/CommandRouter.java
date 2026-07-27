@@ -19,8 +19,10 @@ import java.util.Map;
  * <h2>Standardized error codes (SOUTHBOUND.md §2.2)</h2>
  * <ul>
  *   <li>{@link #ERR_NO_SUCH_INSTANCE} — the request named an instance that is not configured/connected.</li>
- *   <li>{@link #ERR_BAD_ARGS} — a missing instance selector when several are configured, {@code repoll}
- *       while paused, or a malformed argument.</li>
+ *   <li>{@link #ERR_BAD_ARGS} — a missing instance selector when several are configured, or a malformed
+ *       argument.</li>
+ *   <li>{@link #ERR_PAUSED} — a whole-operation the paused state prohibits ({@code repoll} while
+ *       paused).</li>
  * </ul>
  * (Verb-specific codes such as {@code DEVICE_UNAVAILABLE}, {@code RECONNECT_FAILED}, and the write/read
  * codes are raised by the {@link DeviceSession} implementation and propagate through unchanged.)
@@ -32,6 +34,9 @@ public class CommandRouter {
 
     /** Error code: a malformed argument, a missing instance selector, or a nonsensical request. */
     public static final String ERR_BAD_ARGS = "BAD_ARGS";
+
+    /** Error code: a whole-operation the paused state prohibits ({@code repoll} while paused). */
+    public static final String ERR_PAUSED = "PAUSED";
 
     /** Error code: the device session is down (raised by the {@link DeviceSession} implementation). */
     public static final String ERR_DEVICE_UNAVAILABLE = "DEVICE_UNAVAILABLE";
@@ -161,7 +166,7 @@ public class CommandRouter {
         DeviceSession d = resolve(body);
         if (d.isPaused()) {
             d.recordCommand(false);
-            throw new CommandException(ERR_BAD_ARGS, "instance is paused - resume before repolling");
+            throw new CommandException(ERR_PAUSED, "instance is paused - resume before repolling");
         }
         try {
             long polled = d.repoll();

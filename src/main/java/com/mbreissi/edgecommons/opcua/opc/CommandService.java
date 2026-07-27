@@ -60,10 +60,12 @@ public class CommandService {
 
     private static final Logger LOGGER = LogManager.getLogger(CommandService.class);
 
+    // The SOUTHBOUND.md §2.2 hierarchical-browse arg clamps: depth 1..4, maxRefs 1..1000.
     private static final int DEFAULT_TREE_DEPTH = 1;
+    private static final int MIN_TREE_DEPTH = 1;
     private static final int MAX_TREE_DEPTH = 4;
     private static final int DEFAULT_TREE_MAX_REFS = 500;
-    private static final int MAX_TREE_MAX_REFS = 2000;
+    private static final int MAX_TREE_MAX_REFS = 1000;
 
     /** Status marker on an {@code sb/write} entry rejected by {@code writes.allow[]}. */
     private static final String WRITE_NOT_ALLOWED = "write not allowed by writes.allow[]";
@@ -152,7 +154,7 @@ public class CommandService {
 
     private JsonObject browseHierarchical(JsonObject reqBody) throws CommandException {
         NodeId rootId = browseRoot(reqBody);
-        int depth = CommandCodec.boundedInt(reqBody, "depth", DEFAULT_TREE_DEPTH, 0, MAX_TREE_DEPTH);
+        int depth = CommandCodec.boundedInt(reqBody, "depth", DEFAULT_TREE_DEPTH, MIN_TREE_DEPTH, MAX_TREE_DEPTH);
         int maxRefs = CommandCodec.boundedInt(reqBody, "maxRefs", DEFAULT_TREE_MAX_REFS, 1, MAX_TREE_MAX_REFS);
         BrowseBudget budget = new BrowseBudget(maxRefs);
 
@@ -551,11 +553,14 @@ public class CommandService {
                 LOGGER.debug("[{}] batch write of {} signal(s) complete", serverConfig.getId(), nodeIds.size());
             } catch (Exception e) {
                 // The write service call itself failed (e.g. session down): mark every batched entry
-                // FAILED so the reply still carries a result for each one.
+                // FAILED so the reply still carries a result for each one. These entries passed
+                // validation + the allow-list and were aborted at the device, so each counts toward
+                // southbound_health.writeErrors.
                 LOGGER.error("[{}] batch write failed: {}", serverConfig.getId(), e.toString());
                 String message = "write failed: " + (e.getMessage() != null ? e.getMessage() : e.toString());
                 for (int entryIdx : batchToEntry) {
                     markWriteFailed(perEntry.get(entryIdx), message);
+                    counters.incrementWriteErrors();
                 }
             }
         }
@@ -568,10 +573,17 @@ public class CommandService {
         return result;
     }
 
+    /**
+     * Confirm one entry {@code FAILED} and count it on the operational {@code WriteFailure} family.
+     * Deliberately does NOT touch {@code southbound_health.writeErrors}: that measure counts
+     * <b>device-path</b> failures only (an entry that passed validation + the allow-list and then
+     * failed at the server, or was aborted by an unavailable session — mirroring {@code readErrors});
+     * policy refusals and caller errors stay out of it. The device-path call sites increment
+     * {@link ClientMetrics#incrementWriteErrors()} themselves.
+     */
     private void markWriteFailed(JsonObject entry, String message) {
         CommandJson.applyWriteFailed(entry, message);
         counters.recordWriteFailure();
-        counters.incrementWriteErrors();
     }
 
     private void emitWriteRejected(String stableSignalId) {

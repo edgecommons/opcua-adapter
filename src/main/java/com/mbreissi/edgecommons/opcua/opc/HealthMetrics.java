@@ -21,13 +21,19 @@ import java.util.Map;
  *   <tr><td>{@code readErrors}</td><td>Count</td><td>60</td><td>read errors over the interval</td></tr>
  *   <tr><td>{@code staleSignals}</td><td>Count</td><td>60</td><td>signals with no update past {@code healthThresholds.staleSignalSecs}</td></tr>
  *   <tr><td>{@code reconnects}</td><td>Count</td><td>60</td><td>§5-optional: session reconnects over the interval</td></tr>
- *   <tr><td>{@code writeErrors}</td><td>Count</td><td>60</td><td>§5-optional: write errors over the interval</td></tr>
+ *   <tr><td>{@code writeErrors}</td><td>Count</td><td>60</td><td>§5-optional: device-path write failures over the interval</td></tr>
+ *   <tr><td>{@code signalsSubscribed}</td><td>Count</td><td>1</td><td>§5-optional gauge: monitored items served while connected; 0 while disconnected</td></tr>
  * </table>
  *
  * <p>The interval counters ({@code readErrors}, {@code reconnects}, {@code writeErrors}) are drained from
  * {@link ClientMetrics} only here (the OPC UA operational families drain their own, separate counters),
- * so the two emitters never race. {@code staleSignals} is computed from {@link HealthState}'s per-signal
- * last-update tracker against the configured {@code staleSignalSecs} threshold.
+ * so the two emitters never race. {@code writeErrors} counts only <b>device-path</b> failures — an entry
+ * that passed validation and the {@code writes.allow[]} allow-list and was then rejected by the server or
+ * aborted by an unavailable session; policy refusals and caller errors do not count, mirroring
+ * {@code readErrors}. {@code staleSignals} is computed from {@link HealthState}'s per-signal last-update
+ * tracker against the configured {@code staleSignalSecs} threshold. {@code signalsSubscribed} is the
+ * gauge of signals the session currently serves ({@link ClientMetrics#getMonitoredItemCount()} — this
+ * subscribe-model adapter's subscription inventory) while connected, 0 while disconnected.
  */
 public class HealthMetrics {
 
@@ -53,6 +59,7 @@ public class HealthMetrics {
                 .addMeasure("staleSignals", "Count", 60)
                 .addMeasure("reconnects", "Count", 60)
                 .addMeasure("writeErrors", "Count", 60)
+                .addMeasure("signalsSubscribed", "Count", 1)
                 .addDimension("instance", instanceId)
                 .build();
         metrics.defineMetric(metric);
@@ -68,6 +75,7 @@ public class HealthMetrics {
         m.put("staleSignals", (float) health.staleCount(nowNanos, staleAfterNanos));
         m.put("reconnects", (float) counters.getIntervalReconnects());
         m.put("writeErrors", (float) counters.getIntervalWriteErrors());
+        m.put("signalsSubscribed", connected ? (float) counters.getMonitoredItemCount() : 0.0f);
         return m;
     }
 

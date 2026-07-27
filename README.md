@@ -40,8 +40,9 @@ Full operator/integrator docs are in **[`docs/`](docs/)**, organized by [Diátax
   `sb/signals` (the configured inventory, each entry flagged `writable`), `sb/status`, `sb/rescan`, and
   the lifecycle-control verbs `sb/pause` / `sb/resume` (idempotent `{paused, changed}`), `reconnect`
   (`{connected}`), and `repoll` (`{polled}` — an immediate explicit read + republish, refused while
-  paused). Multi-instance requests carry an `instance` selector; standardized error codes
-  (`NO_SUCH_INSTANCE`, `BAD_ARGS`, `WRITE_NOT_ALLOWED`, `RECONNECT_FAILED`, `DEVICE_UNAVAILABLE`, …).
+  paused with `PAUSED`). Multi-instance requests carry an `instance` selector; standardized error codes
+  (`NO_SUCH_INSTANCE`, `BAD_ARGS`, `PAUSED`, `WRITE_NOT_ALLOWED`, `RECONNECT_FAILED`,
+  `DEVICE_UNAVAILABLE`, …).
 - **Edge-console panels** — an `overview` / `signals` / `diagnostics` / `address-space` panel trio
   bound to the served verbs (the overview panel drives the lifecycle-control verbs).
 - **Events** — operator-facing `evt` alarms published through the library **`events()` facade**
@@ -51,9 +52,9 @@ Full operator/integrator docs are in **[`docs/`](docs/)**, organized by [Diátax
 - **Secure connections** — `Basic256Sha256` / `SignAndEncrypt` with the client cert/key from the
   edgecommons **credentials vault**, a file, or a **PKCS#11** token; explicit server trust.
 - **Health** — the canonical `southbound_health` metric (`connectionState`, `publishLatencyMs`,
-  `pollLatencyMs`, `readErrors`, `staleSignals`, `reconnects`, `writeErrors`) on the UNS `metric`
-  class, alongside the `OpcUaCommand` / `OpcUaSubscription` / `OpcUaBrowse` / `OpcUaConnection`
-  operational families. `staleSignals` is driven by `component.global.healthThresholds.staleSignalSecs`
+  `pollLatencyMs`, `readErrors`, `staleSignals`, `reconnects`, `writeErrors`, `signalsSubscribed`)
+  on the UNS `metric` class, alongside the `OpcUaCommand` / `OpcUaSubscription` / `OpcUaBrowse` /
+  `OpcUaConnection` operational families. `staleSignals` is driven by `component.global.healthThresholds.staleSignalSecs`
   (default 30).
 
 ## Architecture

@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -74,11 +75,14 @@ class PanelsTest {
     }
 
     @Test
-    void addressSpace_treeBrowser_bindsBrowseReadWrite() {
+    void addressSpace_treeBrowser_bindsBrowseAndRead_neverWrite() {
         JsonObject tree = widgetOfKind(panel("address-space"), "treeBrowser");
         assertEquals("sb/browse", tree.get("browseVerb").getAsString());
         assertEquals("sb/read", tree.get("readVerb").getAsString());
-        assertEquals("sb/write", tree.get("writeVerb").getAsString());
+        assertEquals("hierarchical", tree.get("mode").getAsString());
+        assertEquals("instance", tree.get("scope").getAsString());
         assertNotNull(tree.get("rootRef"));
+        // The guarded-write console flow does not exist — a renderable descriptor must not advertise it.
+        assertFalse(tree.has("writeVerb"));
     }
 }
