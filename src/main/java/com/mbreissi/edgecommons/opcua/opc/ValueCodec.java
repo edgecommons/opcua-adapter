@@ -55,8 +55,15 @@ public final class ValueCodec {
         return Quality.UNCERTAIN;
     }
 
-    /** Build one contract {@code sample}: value, normalized quality + qualityRaw, source/server timestamps. */
-    public static JsonObject toSample(DataValue value) {
+    /**
+     * Build one contract {@code sample}: value, normalized quality + qualityRaw, source/server
+     * timestamps, plus the additive {@code receivedTs} — the adapter-receive timestamp
+     * (SOUTHBOUND.md §2's four-slot model), carried only when it differs from the sample's
+     * {@code serverTs} (OPC UA is a mediated protocol: the server stamps capture, the adapter
+     * receives later, so it will differ — including when the server supplied no {@code serverTs}
+     * at all). A {@code null} {@code receivedAt} attaches nothing.
+     */
+    public static JsonObject toSample(DataValue value, Instant receivedAt) {
         JsonObject sample = new JsonObject();
         Object v = value.getValue() != null ? value.getValue().getValue() : null;
         sample.add("value", encodeValue(v));
@@ -69,6 +76,9 @@ public final class ValueCodec {
         if (value.getServerTime() != null) {
             sample.addProperty("serverTs", value.getServerTime().getJavaInstant().toString());
         }
+        if (carriesReceivedTs(value, receivedAt)) {
+            sample.addProperty("receivedTs", receivedAt.toString());
+        }
         return sample;
     }
 
@@ -77,16 +87,36 @@ public final class ValueCodec {
      * quality (passed explicitly so the facade never defaults it) + native {@code qualityRaw} +
      * source/server timestamps. {@code sourceTs}/{@code serverTs} are left {@code null} when the
      * server didn't supply one — the facade defaults {@code serverTs} to now and never synthesizes
-     * {@code sourceTs}.
+     * {@code sourceTs}. The adapter-receive moment ({@code receivedAt}) is attached as the additive
+     * {@code receivedTs} sample extra ({@link SignalUpdate.Sample#withExtra}) only when it differs
+     * from the sample's {@code serverTs} — for this mediated protocol it will, including when the
+     * server supplied no {@code serverTs}. A {@code null} {@code receivedAt} attaches nothing.
      */
-    public static SignalUpdate.Sample toSampleParts(DataValue value) {
+    public static SignalUpdate.Sample toSampleParts(DataValue value, Instant receivedAt) {
         Object v = value.getValue() != null ? value.getValue().getValue() : null;
         StatusCode sc = value.getStatusCode();
         Quality quality = normalizeQuality(sc);
         String qualityRaw = sc != null ? sc.toString() : null;
         String sourceTs = value.getSourceTime() != null ? value.getSourceTime().getJavaInstant().toString() : null;
         String serverTs = value.getServerTime() != null ? value.getServerTime().getJavaInstant().toString() : null;
-        return new SignalUpdate.Sample(sampleValue(v), quality, qualityRaw, sourceTs, serverTs);
+        SignalUpdate.Sample sample = new SignalUpdate.Sample(sampleValue(v), quality, qualityRaw, sourceTs, serverTs);
+        if (carriesReceivedTs(value, receivedAt)) {
+            sample = sample.withExtra("receivedTs", receivedAt.toString());
+        }
+        return sample;
+    }
+
+    /**
+     * Whether a sample carries the {@code receivedTs} extra: an adapter-receive moment was captured
+     * AND it differs from the server-supplied {@code serverTs} (an absent {@code serverTs} always
+     * differs — the facade's publish-time default is not the receive moment).
+     */
+    private static boolean carriesReceivedTs(DataValue value, Instant receivedAt) {
+        if (receivedAt == null) {
+            return false;
+        }
+        return value.getServerTime() == null
+                || !receivedAt.equals(value.getServerTime().getJavaInstant());
     }
 
     /**

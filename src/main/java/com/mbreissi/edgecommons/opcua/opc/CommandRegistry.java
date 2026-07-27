@@ -7,16 +7,20 @@ import org.apache.logging.log4j.Logger;
 
 /**
  * The component-level southbound command surface: registers the {@code cmd/sb/*} verb family
- * (docs/SOUTHBOUND.md §2.2) <b>once</b> on the library's single component-scope command inbox
- * ({@code ecv1/{device}/{component}/cmd/#}) and routes each request to the right {@link OpcUaDevice} by
- * its {@code instance} field via the pure {@link CommandRouter}.
+ * (docs/SOUTHBOUND.md §2.2) <b>once</b> on the library's single per-component command inbox — which
+ * subscribes both D‑U28 command scopes ({@code ecv1/{device}/{component}/cmd/#} and
+ * {@code ecv1/{device}/{component}/+/cmd/#}) — and routes each request to the right
+ * {@link OpcUaDevice} via the pure {@link CommandRouter}: the topic-addressed instance token when the
+ * command was instance-scoped (authoritative), else the request's {@code instance} body field.
  *
  * <p><b>Why component-level.</b> The shipped {@link CommandInbox} is one-per-component, while this
  * adapter is multi-instance (one {@link OpcUaDevice} per {@code component.instances[]} entry). So a
- * single set of verbs is registered here and each request body carries an {@code "instance"} selector;
- * when exactly one instance is connected the selector may be omitted. Devices register themselves via
- * {@link #addDevice(OpcUaDevice)} as their connections come up, so a verb aimed at a not-yet-connected
- * instance replies with the standardized {@code NO_SUCH_INSTANCE} rather than blocking.
+ * single set of verbs is registered here through {@link CommandInbox#registerScoped}; a request
+ * addressed instance-scope routes by its topic token, a component-scoped request carries an
+ * {@code "instance"} body selector (omittable when exactly one instance is connected). Devices
+ * register themselves via {@link #addDevice(OpcUaDevice)} as their connections come up, so a verb
+ * aimed at a not-yet-connected instance replies with the standardized {@code NO_SUCH_INSTANCE}
+ * rather than blocking.
  *
  * <p>This class is a thin wiring shell: the dispatch/routing/error-code logic lives in the (tested)
  * {@link CommandRouter}, the panel descriptors in the (tested) {@link Panels}, and the request-body
@@ -51,7 +55,11 @@ public class CommandRegistry {
     }
 
     /**
-     * Registers the {@code sb/*} verbs on the command inbox. Idempotent per verb — the inbox rejects a
+     * Registers the {@code sb/*} verbs on the command inbox through the scope-aware registration
+     * form ({@link CommandInbox#registerScoped}): the inbox subscribes both D‑U28 command scopes and
+     * hands each handler the delivery topic's {@code {instance}} token ({@code null} for a
+     * component-scoped delivery), which the {@link CommandRouter} treats as authoritative over the
+     * {@code body.instance} selector (SOUTHBOUND.md §2.2). Idempotent per verb — the inbox rejects a
      * duplicate registration. No-op when the inbox is absent (a mock/test bring-up with no resolved
      * identity), so the adapter still comes up.
      */
@@ -60,16 +68,16 @@ public class CommandRegistry {
             LOGGER.warn("No command inbox available - the sb/* command surface is disabled");
             return;
         }
-        commands.register("sb/status", req -> router.status(CommandCodec.bodyOf(req)));
-        commands.register("sb/browse", req -> router.browse(CommandCodec.bodyOf(req)));
-        commands.register("sb/read", req -> router.read(CommandCodec.bodyOf(req)));
-        commands.register("sb/write", req -> router.write(CommandCodec.bodyOf(req)));
-        commands.register("sb/signals", req -> router.signals(CommandCodec.bodyOf(req)));
-        commands.register("sb/rescan", req -> router.rescan(CommandCodec.bodyOf(req)));
-        commands.register("sb/pause", req -> router.pause(CommandCodec.bodyOf(req)));
-        commands.register("sb/resume", req -> router.resume(CommandCodec.bodyOf(req)));
-        commands.register("reconnect", req -> router.reconnect(CommandCodec.bodyOf(req)));
-        commands.register("repoll", req -> router.repoll(CommandCodec.bodyOf(req)));
+        commands.registerScoped("sb/status", (req, inst) -> router.status(CommandCodec.bodyOf(req), inst));
+        commands.registerScoped("sb/browse", (req, inst) -> router.browse(CommandCodec.bodyOf(req), inst));
+        commands.registerScoped("sb/read", (req, inst) -> router.read(CommandCodec.bodyOf(req), inst));
+        commands.registerScoped("sb/write", (req, inst) -> router.write(CommandCodec.bodyOf(req), inst));
+        commands.registerScoped("sb/signals", (req, inst) -> router.signals(CommandCodec.bodyOf(req), inst));
+        commands.registerScoped("sb/rescan", (req, inst) -> router.rescan(CommandCodec.bodyOf(req), inst));
+        commands.registerScoped("sb/pause", (req, inst) -> router.pause(CommandCodec.bodyOf(req), inst));
+        commands.registerScoped("sb/resume", (req, inst) -> router.resume(CommandCodec.bodyOf(req), inst));
+        commands.registerScoped("reconnect", (req, inst) -> router.reconnect(CommandCodec.bodyOf(req), inst));
+        commands.registerScoped("repoll", (req, inst) -> router.repoll(CommandCodec.bodyOf(req), inst));
         for (JsonObject panel : Panels.all()) {
             commands.registerPanel(panel);
         }

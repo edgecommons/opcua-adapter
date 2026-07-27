@@ -126,7 +126,10 @@ Keep `queueSize ≥ ceil(publishIntervalMs / samplingRateMs)` or the server disc
 
 Both are request/reply on the component's UNS command inbox
 (`ecv1/{device}/opcua-adapter/cmd/sb/{verb}`), with the request's `header.name` equal to the verb
-and a target `instance` in the body (optional when only one instance is connected). The reply body is
+and a target `instance` in the body (optional when only one instance is connected). Alternatively,
+address the instance on the topic itself — `ecv1/{device}/opcua-adapter/{instance}/cmd/sb/{verb}` —
+and drop the body field; the topic-addressed instance routes the request and is authoritative over a
+conflicting body selector (`BAD_ARGS` when they disagree). The reply body is
 `{ "ok": true, "result": … }` or `{ "ok": false, "error": {code,message} }`.
 
 **Write** — the target's stable `signal.id` must be in the instance's `writes.allow[]` (else it comes

@@ -59,7 +59,7 @@ verb's argument object. A EdgeCommons client's `request()` API sets `header.name
 | Class | Message | Direction | Topic | Owner |
 |-------|---------|-----------|-------|-------|
 | `data` | `SouthboundSignalUpdate` | adapter → bus | `ecv1/{device}/{component}/{instance}/data/{signalPath}` | adapter, via `data()` |
-| `cmd` | `sb/*` verbs (below) | bus ↔ adapter | `ecv1/{device}/{component}/cmd/sb/{verb}` | library inbox |
+| `cmd` | `sb/*` verbs (below) | bus ↔ adapter | `ecv1/{device}/{component}[/{instance}]/cmd/sb/{verb}` | library inbox |
 | `evt` | connection/write alarms | adapter → bus | `ecv1/{device}/{component}/{instance}/evt/{severity}/{type}` | adapter, via `events()` |
 | `metric` | `southbound_health`, `OpcUaCommand`, `OpcUaSubscription`, `OpcUaBrowse`, `OpcUaConnection` | adapter → bus | `ecv1/{device}/{component}/metric/{metricName}` | library (via `MetricEmitter`) |
 | `state` | keepalive | adapter → bus | `ecv1/{device}/{component}/state` | library (heartbeat) |
@@ -75,10 +75,11 @@ verb's argument object. A EdgeCommons client's `request()` API sets `header.name
 - **`state`/`metric`/`cfg`/`log` are reserved** (library-owned): a component publishing to them
   directly is rejected. The adapter's metrics reach `metric/{metricName}` through the
   metric subsystem, not a raw publish.
-- **The command inbox is component-scope** (`ecv1/{device}/{component}/cmd/#`) — one per
-  component, not per device-instance; an instance token is optional and present only for explicit
-  multi-instance addressing. Multi-instance routing is by
-  the request's `instance` field (see below).
+- **The command inbox is one per component and subscribes both command scopes** —
+  component-scope (`ecv1/{device}/{component}/cmd/#`) and instance-scope
+  (`ecv1/{device}/{component}/+/cmd/#`). A command addressed with an `{instance}` topic token routes
+  to that device instance; a component-scoped command routes by the request's `instance` body field
+  (see below).
 
 ## The command surface — `cmd/sb/*` verbs
 
@@ -93,11 +94,20 @@ body:
 
 The reply's `header.name` is the verb (e.g. `sb/write`), with the request's `correlation_id`.
 
-**Instance selector.** Because the inbox is one-per-component but the adapter is multi-instance, every
-`sb/*` request body may carry an **`"instance"`** field naming the target device instance. When exactly
-one instance is connected the field may be omitted (it defaults to that instance). With several
-connected, omitting it returns `BAD_ARGS`; naming an unconnected/unknown instance (or when none is
-connected) returns `NO_SUCH_INSTANCE`.
+**Instance addressing.** The adapter is multi-instance behind one per-component inbox; a request
+selects its target device instance in either of two ways:
+
+- **Topic-addressed (instance scope).** Send the command to
+  `ecv1/{device}/{component}/{instance}/cmd/sb/{verb}` — the `{instance}` topic token routes the
+  request and is **authoritative**: a `body.instance` that disagrees with it is refused with
+  `BAD_ARGS` (drop the body field or make them agree); with only the topic token present, it routes.
+- **Component-scoped body selector.** Send the command to
+  `ecv1/{device}/{component}/cmd/sb/{verb}` with an **`"instance"`** body field naming the target.
+  When exactly one instance is connected the field may be omitted (it defaults to that instance);
+  with several connected, omitting it returns `BAD_ARGS`.
+
+Either way, naming an unconnected/unknown instance (or when none is connected) returns
+`NO_SUCH_INSTANCE`.
 
 | Verb | Kind | Purpose |
 |------|------|---------|
@@ -124,8 +134,12 @@ The `value`/`quality`/timestamp shape used in both `SouthboundSignalUpdate` and 
 | `value` | number \| boolean \| string \| array | Numbers (incl. OPC UA unsigned) → JSON number; booleans → JSON boolean; `DateTime` → ISO-8601 string; **arrays → JSON array** (each element by these same rules); anything else → string. |
 | `quality` | string | Normalized: `GOOD` \| `BAD` \| `UNCERTAIN`. |
 | `qualityRaw` | string | Native OPC UA `StatusCode`. |
-| `sourceTs` | string \| null | Device timestamp, ISO-8601 UTC. |
-| `serverTs` | string \| null | Server timestamp, ISO-8601 UTC. |
+| `sourceTs` | string \| null | The **machine** timestamp (OPC UA SourceTimestamp), ISO-8601 UTC; present only when the server supplied it — never synthesized. |
+| `serverTs` | string \| null | The **capture** timestamp (OPC UA ServerTimestamp — the OPC UA server's stamp), ISO-8601 UTC. |
+| `receivedTs` | string | The **adapter receive** timestamp, ISO-8601 UTC — when the value arrived at the adapter from the mediating OPC UA server. Additive per-sample field, present only when it differs from the sample's `serverTs` (for this mediated protocol it does, including when the server supplied no `serverTs`). |
+
+The envelope `header.timestamp` is the **publish** timestamp — under batching (`publish.batchMs`),
+`receivedTs` and the publish moment diverge, so each sample keeps its own receive stamp.
 
 The complete OPC UA ↔ JSON mapping for every type is in **[data-types.md](data-types.md)**.
 
@@ -150,7 +164,8 @@ many, per `publish.batchMs`). Topic: `ecv1/{device}/{component}/{instance}/data/
     "address": { "ns": 2, "namespaceUri": "urn:kepware:KEPServerEX", "nodeId": "Channel1.Device1.Sine1" }
   },
   "samples": [ { "value": 0.7071, "quality": "GOOD", "qualityRaw": "Good (0x00000000)",
-                 "sourceTs": "2026-07-03T12:00:00.123Z", "serverTs": "2026-07-03T12:00:00.150Z" } ]
+                 "sourceTs": "2026-07-03T12:00:00.123Z", "serverTs": "2026-07-03T12:00:00.150Z",
+                 "receivedTs": "2026-07-03T12:00:00.190Z" } ]
 }
 ```
 
@@ -225,7 +240,7 @@ Reads arbitrary signals on demand. Request body:
     "id": "kep1",
     "reads": [ { "signal": { "id": "ns=2;s=…Counter", "address": { "ns": 2, "namespaceUri": "urn:kepware:KEPServerEX", "nodeId": "…Counter" } },
                  "value": 17, "quality": "GOOD", "qualityRaw": "Good (0x00000000)",
-                 "sourceTs": "…", "serverTs": "…" } ] } }
+                 "sourceTs": "…", "serverTs": "…", "receivedTs": "…" } ] } }
 ```
 
 Each explicit signal is addressed by `namespaceUri` (preferred) or `ns` index, plus `signalId` (and an

@@ -95,6 +95,10 @@ leaving the value unchanged. The `ExtensionObject` (structure) row is confirmed 
   (not an error); see the [sample object](messaging-interface.md#sample-object) and
   [metrics](metrics.md#southbound_health). Type coercion that fails on write skips
   only that entry.
+- **Timestamps ride beside the value.** Every sample carries the OPC UA SourceTimestamp as
+  `sourceTs` (when the server supplied it) and the ServerTimestamp as `serverTs`, plus the
+  adapter-receive timestamp `receivedTs` when it differs from `serverTs` — see the
+  [sample object](messaging-interface.md#sample-object) for the full timestamp model.
 - **KEP BCD / LBCD (codes 11 / 12).** These are KEPServerEX register *presentations*, exposed over
   OPC UA as their underlying numeric type (typically `UInt16` / `UInt32`); they ride the matching
   numeric row above.

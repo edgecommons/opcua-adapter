@@ -30,6 +30,7 @@ import org.eclipse.milo.opcua.stack.core.types.structured.BrowseDescription;
 import org.eclipse.milo.opcua.stack.core.types.structured.BrowseResult;
 import org.eclipse.milo.opcua.stack.core.types.structured.ReferenceDescription;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -358,7 +359,8 @@ public class CommandService {
     /**
      * {@code sb/read}: on-demand batch read. Request body
      * {@code {"signals":[{namespaceUri|ns, signalId}, ...], "include":[{matcher}], "exclude":[{matcher}]}};
-     * result {@code {id, reads:[{signal:{id,address}, value, quality, qualityRaw, sourceTs, serverTs}]}}.
+     * result {@code {id, reads:[{signal:{id,address}, value, quality, qualityRaw, sourceTs, serverTs,
+     * receivedTs}]}}.
      * {@code signals} names exact signals (order and duplicates preserved); {@code include} (with optional
      * {@code exclude}) selects signals by the same namespace + regex matching used for subscriptions.
      * A malformed matcher throws {@code BAD_ARGS}. The read round-trip is recorded into
@@ -425,6 +427,9 @@ public class CommandService {
             List<DataValue> values = nodeIds.isEmpty()
                     ? new ArrayList<>()
                     : client.readValuesAsync(0.0, TimestampsToReturn.Both, nodeIds).get();
+            // The adapter-receive moment for the whole batch: the read just completed, so this is
+            // when these values arrived from the mediating server (→ each sample's receivedTs).
+            Instant receivedAt = Instant.now();
             // Record the read round-trip for southbound_health.pollLatencyMs (this subscribe-model
             // adapter's "poll" is an explicit read via sb/read / repoll).
             if (health != null && !nodeIds.isEmpty()) {
@@ -437,7 +442,7 @@ public class CommandService {
                 JsonObject signal = new JsonObject();
                 signal.addProperty("id", nodeId.toParseableString());
                 signal.add("address", ValueCodec.address(nodeId, client.getNamespaceTable()));
-                JsonObject read = ValueCodec.toSample(values.get(i));
+                JsonObject read = ValueCodec.toSample(values.get(i), receivedAt);
                 read.add("signal", signal);
                 reads.add(read);
                 counters.recordReadRequest();

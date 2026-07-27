@@ -132,7 +132,7 @@ class CommandRouterTest {
         CommandRouter router = new CommandRouter();
         FakeSession only = new FakeSession("kep1");
         router.addDevice(only);
-        assertEquals("kep1", router.resolve(new JsonObject()).id());
+        assertEquals("kep1", router.resolve(new JsonObject(), null).id());
     }
 
     @Test
@@ -140,7 +140,7 @@ class CommandRouterTest {
         CommandRouter router = new CommandRouter();
         router.addDevice(new FakeSession("kep1"));
         router.addDevice(new FakeSession("kep2"));
-        CommandException e = assertThrows(CommandException.class, () -> router.resolve(new JsonObject()));
+        CommandException e = assertThrows(CommandException.class, () -> router.resolve(new JsonObject(), null));
         assertEquals(CommandRouter.ERR_BAD_ARGS, e.getCode());
     }
 
@@ -148,14 +148,14 @@ class CommandRouterTest {
     void resolve_unknownInstance_isNoSuchInstance() {
         CommandRouter router = new CommandRouter();
         router.addDevice(new FakeSession("kep1"));
-        CommandException e = assertThrows(CommandException.class, () -> router.resolve(body("nope")));
+        CommandException e = assertThrows(CommandException.class, () -> router.resolve(body("nope"), null));
         assertEquals(CommandRouter.ERR_NO_SUCH_INSTANCE, e.getCode());
     }
 
     @Test
     void resolve_noneConnected_isNoSuchInstance() {
         CommandRouter router = new CommandRouter();
-        CommandException e = assertThrows(CommandException.class, () -> router.resolve(new JsonObject()));
+        CommandException e = assertThrows(CommandException.class, () -> router.resolve(new JsonObject(), null));
         assertEquals(CommandRouter.ERR_NO_SUCH_INSTANCE, e.getCode());
     }
 
@@ -164,7 +164,66 @@ class CommandRouterTest {
         CommandRouter router = new CommandRouter();
         router.addDevice(new FakeSession("kep1"));
         router.addDevice(new FakeSession("kep2"));
-        assertEquals("kep2", router.resolve(body("kep2")).id());
+        assertEquals("kep2", router.resolve(body("kep2"), null).id());
+    }
+
+    // ---- scoped (topic-addressed) routing, SOUTHBOUND.md §2.2 / D-U28 ----------------------------
+
+    @Test
+    void resolve_topicAddressedInstance_isAuthoritative_conflictingBodyIsBadArgs() {
+        CommandRouter router = new CommandRouter();
+        router.addDevice(new FakeSession("kep1"));
+        router.addDevice(new FakeSession("kep2"));
+        CommandException e = assertThrows(CommandException.class,
+                () -> router.resolve(body("kep2"), "kep1"));
+        assertEquals(CommandRouter.ERR_BAD_ARGS, e.getCode());
+    }
+
+    @Test
+    void resolve_topicAddressedOnly_routesByTheTopicToken() throws Exception {
+        CommandRouter router = new CommandRouter();
+        router.addDevice(new FakeSession("kep1"));
+        router.addDevice(new FakeSession("kep2"));
+        // No body selector at all — the topic-addressed instance routes, even with several connected.
+        assertEquals("kep2", router.resolve(new JsonObject(), "kep2").id());
+    }
+
+    @Test
+    void resolve_topicAddressedAgreeingWithBody_routes() throws Exception {
+        CommandRouter router = new CommandRouter();
+        router.addDevice(new FakeSession("kep1"));
+        router.addDevice(new FakeSession("kep2"));
+        assertEquals("kep2", router.resolve(body("kep2"), "kep2").id());
+    }
+
+    @Test
+    void resolve_topicAddressedUnknownInstance_isNoSuchInstance() {
+        CommandRouter router = new CommandRouter();
+        router.addDevice(new FakeSession("kep1"));
+        CommandException e = assertThrows(CommandException.class,
+                () -> router.resolve(new JsonObject(), "nope"));
+        assertEquals(CommandRouter.ERR_NO_SUCH_INSTANCE, e.getCode());
+    }
+
+    @Test
+    void resolve_componentScoped_nullToken_fallsBackToBodyRouting() throws Exception {
+        CommandRouter router = new CommandRouter();
+        router.addDevice(new FakeSession("kep1"));
+        router.addDevice(new FakeSession("kep2"));
+        assertEquals("kep1", router.resolve(body("kep1"), null).id());
+    }
+
+    @Test
+    void verbs_routeByTheTopicAddressedInstance() throws Exception {
+        CommandRouter router = new CommandRouter();
+        FakeSession kep1 = new FakeSession("kep1");
+        FakeSession kep2 = new FakeSession("kep2");
+        router.addDevice(kep1);
+        router.addDevice(kep2);
+        assertEquals("kep2", router.status(new JsonObject(), "kep2").get("id").getAsString());
+        assertEquals("kep2", router.repoll(new JsonObject(), "kep2").get("id").getAsString());
+        assertEquals(2, kep2.commandsOk);
+        assertEquals(0, kep1.commandsOk);
     }
 
     // ---- pass-through verbs record success -------------------------------------------------------
@@ -174,12 +233,12 @@ class CommandRouterTest {
         CommandRouter router = new CommandRouter();
         FakeSession s = new FakeSession("kep1");
         router.addDevice(s);
-        assertEquals("kep1", router.status(new JsonObject()).get("id").getAsString());
-        router.signals(new JsonObject());
-        router.browse(new JsonObject());
-        router.read(new JsonObject());
-        router.write(new JsonObject());
-        router.rescan(new JsonObject());
+        assertEquals("kep1", router.status(new JsonObject(), null).get("id").getAsString());
+        router.signals(new JsonObject(), null);
+        router.browse(new JsonObject(), null);
+        router.read(new JsonObject(), null);
+        router.write(new JsonObject(), null);
+        router.rescan(new JsonObject(), null);
         assertEquals(6, s.commandsOk);
         assertEquals(0, s.commandsFailed);
     }
@@ -192,15 +251,15 @@ class CommandRouterTest {
         FakeSession s = new FakeSession("kep1");
         router.addDevice(s);
 
-        JsonObject first = router.pause(new JsonObject());
+        JsonObject first = router.pause(new JsonObject(), null);
         assertTrue(first.get("paused").getAsBoolean());
         assertTrue(first.get("changed").getAsBoolean());
 
-        JsonObject second = router.pause(new JsonObject());
+        JsonObject second = router.pause(new JsonObject(), null);
         assertTrue(second.get("paused").getAsBoolean());
         assertFalse(second.get("changed").getAsBoolean());
 
-        JsonObject resumed = router.resume(new JsonObject());
+        JsonObject resumed = router.resume(new JsonObject(), null);
         assertFalse(resumed.get("paused").getAsBoolean());
         assertTrue(resumed.get("changed").getAsBoolean());
     }
@@ -213,7 +272,7 @@ class CommandRouterTest {
         FakeSession s = new FakeSession("kep1");
         s.connected = false;
         router.addDevice(s);
-        JsonObject out = router.reconnect(new JsonObject());
+        JsonObject out = router.reconnect(new JsonObject(), null);
         assertTrue(out.get("connected").getAsBoolean());
         assertEquals(1, s.commandsOk);
     }
@@ -224,7 +283,7 @@ class CommandRouterTest {
         FakeSession s = new FakeSession("kep1");
         s.reconnectFails = true;
         router.addDevice(s);
-        CommandException e = assertThrows(CommandException.class, () -> router.reconnect(new JsonObject()));
+        CommandException e = assertThrows(CommandException.class, () -> router.reconnect(new JsonObject(), null));
         assertEquals(CommandRouter.ERR_RECONNECT_FAILED, e.getCode());
         assertEquals(1, s.commandsFailed);
     }
@@ -237,7 +296,7 @@ class CommandRouterTest {
         FakeSession s = new FakeSession("kep1");
         s.polled = 7;
         router.addDevice(s);
-        assertEquals(7, router.repoll(new JsonObject()).get("polled").getAsLong());
+        assertEquals(7, router.repoll(new JsonObject(), null).get("polled").getAsLong());
         assertEquals(1, s.commandsOk);
     }
 
@@ -247,7 +306,7 @@ class CommandRouterTest {
         FakeSession s = new FakeSession("kep1");
         s.paused = true;
         router.addDevice(s);
-        CommandException e = assertThrows(CommandException.class, () -> router.repoll(new JsonObject()));
+        CommandException e = assertThrows(CommandException.class, () -> router.repoll(new JsonObject(), null));
         assertEquals(CommandRouter.ERR_PAUSED, e.getCode());
         assertEquals(1, s.commandsFailed);
     }
@@ -258,7 +317,7 @@ class CommandRouterTest {
         FakeSession s = new FakeSession("kep1");
         s.repollUnavailable = true;
         router.addDevice(s);
-        CommandException e = assertThrows(CommandException.class, () -> router.repoll(new JsonObject()));
+        CommandException e = assertThrows(CommandException.class, () -> router.repoll(new JsonObject(), null));
         assertEquals(CommandRouter.ERR_DEVICE_UNAVAILABLE, e.getCode());
         assertEquals(1, s.commandsFailed);
     }
@@ -274,6 +333,6 @@ class CommandRouterTest {
             }
         };
         router.addDevice(failing);
-        assertThrows(CommandException.class, () -> router.browse(new JsonObject()));
+        assertThrows(CommandException.class, () -> router.browse(new JsonObject(), null));
     }
 }

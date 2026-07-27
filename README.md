@@ -34,13 +34,16 @@ Full operator/integrator docs are in **[`docs/`](docs/)**, organized by [Diátax
 - **Signal-update publishing** — each change → a `SouthboundSignalUpdate` message on the UNS `data`
   class, published through the library **`data()` facade** (normalized `GOOD|BAD|UNCERTAIN` quality —
   passed explicitly from OPC UA's own `StatusCode`, never defaulted — + native `qualityRaw` +
-  source/server timestamps), batched per signal, stamped with the top-level `identity`.
+  source/server timestamps + a per-sample adapter-receive `receivedTs` when it differs from
+  `serverTs`), batched per signal, stamped with the top-level `identity`.
 - **Command surface** — the standardized `cmd/sb/*` family on the library inbox: `sb/read`,
   allow-listed `sb/write` (confirmed, per-entry ack), `sb/browse` (hierarchical address-space refs),
   `sb/signals` (the configured inventory, each entry flagged `writable`), `sb/status`, `sb/rescan`, and
   the lifecycle-control verbs `sb/pause` / `sb/resume` (idempotent `{paused, changed}`), `reconnect`
   (`{connected}`), and `repoll` (`{polled}` — an immediate explicit read + republish, refused while
-  paused with `PAUSED`). Multi-instance requests carry an `instance` selector; standardized error codes
+  paused with `PAUSED`). Multi-instance requests target a device instance by the `{instance}` topic
+  token (authoritative; a conflicting body selector is `BAD_ARGS`) or, component-scoped, by an
+  `instance` body selector; standardized error codes
   (`NO_SUCH_INSTANCE`, `BAD_ARGS`, `PAUSED`, `WRITE_NOT_ALLOWED`, `RECONNECT_FAILED`,
   `DEVICE_UNAVAILABLE`, …).
 - **Edge-console panels** — an `overview` / `signals` / `diagnostics` / `address-space` panel trio
