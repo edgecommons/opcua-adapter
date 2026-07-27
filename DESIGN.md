@@ -11,9 +11,10 @@ describes only the current behavior.
 `OpcUaConnection` (Milo client + security + reconnect), `AddressSpaceBrowser`, `SubscriptionManager`,
 `SignalUpdatePublisher`, `CommandService` (read/write/browse engine), `HealthState`/`HealthMetrics`/
 `OpcUaOperationalMetrics`. The component-level `CommandRegistry` registers the `sb/*` verbs once on the
-library inbox through the scope-aware registration form (`registerScoped`) and delegates dispatch to the
-pure `CommandRouter`, which routes on the topic-addressed instance token (authoritative) or the
-`instance` body selector through the `DeviceSession` seam.
+library inbox, each declaring `CommandScope.INSTANCE`, and delegates dispatch to the pure
+`CommandRouter`, which resolves the library-supplied addressed instance against the connected devices
+(the optional-iff-one default and the `NO_SUCH_INSTANCE` existence check) and calls through the
+`DeviceSession` seam.
 
 The seam is the coverage boundary: the router, the health/staleness core, the value/signal codecs, and
 the config model are broker-free and unit-tested; the live Milo layer is excluded from the in-process
@@ -23,7 +24,7 @@ gate and validated against a real server (`validation/`) and the Greengrass lab.
 
 | ID | Decision | Rationale |
 |----|----------|-----------|
-| D-OPCUA-1 | **Component-level command inbox; instance routing by the topic-addressed instance (authoritative) or the `instance` body field.** The library `CommandInbox` is one-per-component and subscribes both D-U28 command scopes; this adapter is multi-instance. Verbs register once via `registerScoped`, whose handlers receive the delivery topic's `{instance}` token: the topic-addressed instance routes and is authoritative (a conflicting `body.instance` → `BAD_ARGS`; topic-only → route by it); a component-scoped request routes by the optional `instance` body selector (required only when >1 instance is connected). *(Amended in the core-0.4.0 adoption: originally body-field routing only — the pre-0.4.0 inbox had no scoped registration form.)* | Per-instance inboxes are not a shipped library facade. SOUTHBOUND.md §2.2 makes the topic-addressed instance authoritative; `registerScoped` (core 0.4.0) hands the token through without re-deriving identity from config. |
+| D-OPCUA-1 | **Component-level command inbox; all ten `sb/*` verbs declare `CommandScope.INSTANCE`, and addressing is the library's.** The library `CommandInbox` is one-per-component and subscribes both D-U28 command scopes; this adapter is multi-instance. Each verb registers once via `register(verb, CommandScope.INSTANCE, handler)`; the inbox extracts the delivery topic's `{instance}` token and the body's `instance` field, refuses a conflict between them with `BAD_ARGS` **before dispatch**, and hands the handler the resolved `addressedInstance`. The two policies that need this adapter's configuration stay component-side (D-SC-4): the optional-iff-one default (route to the sole connected instance when none is addressed; `BAD_ARGS` when several are connected) and `NO_SUCH_INSTANCE` for an instance that is not connected. *(Amended twice: the pre-0.4.0 inbox had body-field routing only; the 0.4.0 adoption added `registerScoped` with adapter-side topic/body/conflict logic; the core-0.5.0 adoption deleted that logic — the library owns addressing now.)* | Per-instance inboxes are not a shipped library facade. A declared scope makes "this verb acts on one server" a registration-time fact the library enforces and `describe` advertises, instead of a convention each adapter re-implements; one adapter's hand-rolled topic/body precedence can no longer drift from SOUTHBOUND.md §2.2. |
 | D-OPCUA-2 | **`writes.allow[]` is matched on the stable `signal.id`** (the parseable `ns=…;…=…` form, as published), checked before any device I/O; empty list = read-only; `"*"` = allow all. | A volatile namespace index must never gate a control write; the stable id is what consumers already key on. |
 | D-OPCUA-3 | **`sb/browse` returns hierarchical reference trees** (`depth` clamped 1..4, `maxRefs` clamped 1..1000, `truncated` flag — the SOUTHBOUND.md §2.2 hierarchical-mode clamps; `ref` stays optional, defaulting to the OPC UA RootFolder, because hierarchical is this adapter's only browse mode and a real address space has a real root — there is no paged `cursor`/`max` form to disambiguate from). | The reference implementation for address-space discovery; bounded to protect the server and the bus. Was `depth` 0..4 / `maxRefs` 1..2000 before the southbound-conformance alignment. |
 | D-OPCUA-4 | **`DeviceSession` seam in front of the live Milo layer.** Browse/read/write/subscribe/lifecycle operations are exposed through an interface; `OpcUaDevice` is the live impl, and a fake session drives the `CommandRouter` unit tests. | Makes the dispatch/routing/error-code/lifecycle contract testable without a live server, so the coverage gate is honest and only the thin live driver seam is excluded. |
@@ -34,6 +35,7 @@ gate and validated against a real server (`validation/`) and the Greengrass lab.
 | D-OPCUA-9 | **The `sb/*` command surface is counted on the existing `OpcUaCommand` family** via new `CommandRequest*`/`CommandFailure*` `(total, interval)` measures (dimensioned by `instance` only), rather than re-dimensioning the family by `verb`×`result`. | The issue's item-8 review calls the instance-only operational-family pattern exemplary/MET; adding a low-cardinality command counter records the whole `sb/*` surface without a wire-metric re-dimension (a per-verb dimension would be a larger, unrequested change to a shipped family). This is a deliberate, surfaced choice — a per-verb breakdown would need a new dimension key. |
 | D-OPCUA-10 | **`receivedTs` rides as the additive per-sample extra, captured at receive** (core 0.4.0 / SOUTHBOUND.md §2 four-slot model). OPC UA is a mediated protocol: Milo's SourceTimestamp maps to `sourceTs`, ServerTimestamp (the server's capture stamp) to `serverTs`, and the adapter-receive moment is attached via `Sample.withExtra("receivedTs", …)` — only when it differs from the sample's `serverTs` (an absent `serverTs` always differs: the facade's publish-time default is not the receive moment). Capture happens at `SignalUpdatePublisher.offer` (per value change, before any `batchMs` buffering) and at `sb/read` completion (one batch stamp), never at publish. | Under batching the receive and publish moments diverge; stamping at publish would falsify the slot. The differs-only rule keeps the wire lean where a hypothetical equal stamp adds nothing (per SOUTHBOUND.md: direct-client adapters omit it entirely). |
 | D-OPCUA-11 | **`setCommandAvailability` (core 0.4.0): N/A for this adapter — no verb is conditionally available.** Every registered `sb/*` verb is structurally served: `sb/write` is always available as a verb (write *policy* is per-entry `writes.allow[]` gating with per-entry `FAILED` + `evt/warning/write-rejected`, not a verb-level availability state — an empty allow-list means every entry is refused, but the verb still answers), and the lifecycle verbs are always meaningful. No `disabled`/`unsupported` declaration is stored. | The adoption rule is "adopt only where genuinely conditional"; inventing a verb-level state for a per-entry policy would misreport the surface to `describe` consumers (a console would grey out a verb that in fact answers every request). |
+| D-OPCUA-12 | **The keepalive's `instances[]` entries carry a `state` token from the one per-instance state model** (core 0.5.0 / D-SC-7). `HealthState` gains a `LinkState` (`CONNECTING` → never been up, `ONLINE`, `BACKOFF` → was up and is re-establishing) folded from the live Milo session flag wherever the device already observes it (initial connect, the device tick, `reconnect`, and each keepalive/`sb/status` sample); the reported token is `PAUSED` when the instance is paused **and** the link is up, else the link token. The same model answers `sb/status`, whose reply gains the same `state` field, and a configured server whose worker has not built its device yet reports `CONNECTING` with no `detail`. | A boolean cannot separate "deliberately paused" from "silently gone stale", so a console alarms on intentional pauses and shows "connected" while data has stopped. Deriving both the pushed and the pulled view from one model is what makes them un-disagreeable; a second bookkeeping path would reintroduce exactly the drift D-SC-7 forbids. A break while paused deliberately reads `BACKOFF` so `connected` stays truthful. |
 
 ## Breaking wire changes in this baseline (SD-E)
 
@@ -67,12 +69,25 @@ posture as SD-E above):
 - **Panel descriptor:** the `address-space` `treeBrowser` no longer advertises `writeVerb` (the
   guarded-write console flow does not exist); `cmd/sb/write` itself is unchanged.
 
+## Additive wire changes in the core-0.5.0 adoption
+
+Neither change removes or renames anything on the wire; consumers that ignore the new field keep
+working (per D-SC-7, an absent/unknown `state` must be ignored):
+
+- **`state` keepalive:** each `instances[]` entry gains `state`
+  (`CONNECTING` | `ONLINE` | `BACKOFF` | `PAUSED`) beside the existing `connected`/`detail`.
+- **`sb/status`:** the reply gains the same `state` field beside `connected`/`paused`.
+- **`describe`:** every `sb/*` verb now advertises `"scope": "instance"` (the library populates it from
+  the declared `CommandScope`). Addressing errors are raised by the library before the handler runs;
+  the codes are unchanged (`BAD_ARGS` for a topic/body conflict), only the message text differs.
+
 ## Coverage-gate scope
 
 The JaCoCo 90% line gate excludes **only** the live Milo driver seam + bootstrap: `OpcUaAdapter`,
 `OpcUaConnection`, `AddressSpaceBrowser`, `SubscriptionManager`, `SignalUpdatePublisher`,
-`CommandService`, `OpcUaDevice` (incl. its timer task), `CommandRegistry` (inbox wiring + panels), and
-`opc/security/**` — all validated on real infrastructure. The router, `HealthState`, `HealthMetrics`,
+`CommandService`, `OpcUaDevice` (incl. its timer task), and
+`opc/security/**` — all validated on real infrastructure. `CommandRegistry` is **not** excluded (only
+its register-on-a-live-inbox calls are uncovered). The router, `HealthState`, `HealthMetrics`,
 `OpcUaOperationalMetrics`, `ClientMetrics`, `ValueCodec`, `SignalMatching`, `CommandJson`, and the
 config model stay in the gate and are unit-tested. Do not widen the excludes to pass — add tests.
 

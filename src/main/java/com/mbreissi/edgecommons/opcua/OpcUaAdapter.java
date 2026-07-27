@@ -73,6 +73,9 @@ public class OpcUaAdapter {
         // Report each configured OPC UA server's connectivity AT THE INSTANCE LEVEL via the component's
         // main state keepalive's instances[] (the #1c surface): a server that has not (re)connected reads
         // disconnected. Identity/data/lifecycle stay under `main`; this is the per-server connectivity view.
+        // Each entry also carries the CONNECTING/ONLINE/BACKOFF/PAUSED state token (D-SC-7), taken from
+        // the device's HealthState - the same model that answers sb/status - so a deliberately paused
+        // server is distinguishable from one that silently went stale.
         edgeCommons.setInstanceConnectivityProvider(() -> {
             Map<String, OpcUaDevice> byId = new HashMap<>();
             synchronized (devices) {
@@ -83,8 +86,7 @@ public class OpcUaAdapter {
             List<InstanceConnectivity> out = new ArrayList<>();
             for (String id : config.getInstanceIds()) {
                 OpcUaDevice d = byId.get(id);
-                out.add(InstanceConnectivity.of(id, d != null && d.isConnected(),
-                        d != null ? d.getEndpoint() : null));
+                out.add(d != null ? d.connectivity() : HealthState.pendingConnectivity(id));
             }
             return out;
         });

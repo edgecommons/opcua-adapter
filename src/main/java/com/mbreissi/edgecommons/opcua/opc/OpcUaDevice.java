@@ -7,6 +7,7 @@ import com.mbreissi.edgecommons.config.ConfigManager;
 import com.mbreissi.edgecommons.credentials.CredentialService;
 import com.mbreissi.edgecommons.facades.EventsFacade;
 import com.mbreissi.edgecommons.facades.Severity;
+import com.mbreissi.edgecommons.heartbeat.InstanceConnectivity;
 import com.mbreissi.edgecommons.metrics.MetricEmitter;
 import com.mbreissi.edgecommons.opcua.opc.config.ServerConfiguration;
 import org.apache.logging.log4j.LogManager;
@@ -79,10 +80,15 @@ public class OpcUaDevice implements DeviceSession {
                 new OpcUaOperationalMetrics(metrics, configManager, config.getId(), counters);
         healthMetrics.emit(false);
 
-        // 1. Connect (blocks + retries).
+        // 1. Connect (blocks + retries). Each failed attempt keeps the link state CONNECTING (it has
+        // never been up), so the keepalive reports a server that is still coming up as such.
         connection = new OpcUaConnection(config, credentials, counters);
-        OpcUaClient client = connection.connect(() -> healthMetrics.emit(false));
+        OpcUaClient client = connection.connect(() -> {
+            health.observeConnected(false);
+            healthMetrics.emit(false);
+        });
         lastConnected = true;
+        health.observeConnected(true);
         healthMetrics.emitNow(true);
 
         // 2. Browse the address space (weakly-consistent map so sb/rescan can refresh it safely).
@@ -108,6 +114,7 @@ public class OpcUaDevice implements DeviceSession {
                 // connection.isConnected() is kept live by Milo's SessionActivityListener (wired in
                 // OpcUaConnection.connect()) — no active probe needed.
                 boolean now = connection.isConnected();
+                health.observeConnected(now);
                 operationalMetrics.emit(now);
                 if (now != lastConnected) {
                     lastConnected = now;
@@ -149,9 +156,21 @@ public class OpcUaDevice implements DeviceSession {
 
     @Override
     public JsonObject status() {
+        health.observeConnected(connection.isConnected());
         JsonObject result = commands.status();
+        result.addProperty("state", health.stateToken());
         result.addProperty("paused", health.isPaused());
         return result;
+    }
+
+    /**
+     * This device's {@code state} keepalive element (D‑SC‑7), sampled from the same {@link HealthState}
+     * that answers {@code sb/status}: the live {@code connected} flag, the endpoint as {@code detail},
+     * and the {@code CONNECTING}/{@code ONLINE}/{@code BACKOFF}/{@code PAUSED} state token.
+     */
+    public InstanceConnectivity connectivity() {
+        health.observeConnected(connection.isConnected());
+        return health.connectivity(config.getId(), getEndpoint());
     }
 
     @Override
@@ -206,10 +225,12 @@ public class OpcUaDevice implements DeviceSession {
         try {
             connection.reconnect();
         } catch (Exception e) {
+            health.observeConnected(connection.isConnected());
             healthMetrics.emitNow(connection.isConnected());
             throw new CommandException(CommandRouter.ERR_RECONNECT_FAILED,
                     "reconnect failed: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
         }
+        health.observeConnected(connection.isConnected());
         healthMetrics.emitNow(connection.isConnected());
         return connection.isConnected();
     }

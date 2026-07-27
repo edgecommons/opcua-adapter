@@ -15,11 +15,13 @@ chart an OPC UA node without knowing the protocol. One OPC UA **server** is one
 ## The shape (the seam you implement)
 
 The component-level `CommandRegistry` registers the `sb/*` verbs once on the library command inbox
-via `registerScoped` (the inbox is one-per-component, subscribes both D-U28 command scopes, and hands
-handlers the delivery topic's `{instance}` token; this adapter is multi-instance). The **pure
-`CommandRouter`** routes each request to a device — the topic-addressed instance is authoritative
-(a conflicting `body.instance` is `BAD_ARGS`); component-scoped requests route by the `instance`
-body field — enforces the standardized error-code family, shapes
+(one-per-component, subscribing both D-U28 command scopes; this adapter is multi-instance). **Every
+verb declares `CommandScope.INSTANCE`** — the library owns addressing and enforces it before dispatch
+(topic token and `body.instance` extracted, a conflict refused with `BAD_ARGS`, the resolved
+`addressedInstance` handed to the handler). **Never re-derive addressing here**: the two policies that
+need this adapter's configuration are the only ones that stay component-side (D-SC-4) — the
+optional-iff-one default and `NO_SUCH_INSTANCE`, both applied by the **pure `CommandRouter`**, which
+also enforces the standardized error-code family, shapes
 the lifecycle-verb replies, and records the `OpcUaCommand` metric — all against the **`DeviceSession`**
 seam, so the whole dispatch/routing/lifecycle contract is unit-tested with a fake session, no live
 server. `OpcUaDevice` is the live `DeviceSession`: it owns the Milo client (`OpcUaConnection`), the
@@ -27,13 +29,19 @@ address-space cache (`AddressSpaceBrowser`), the subscriptions (`SubscriptionMan
 (`SignalUpdatePublisher`), the read/write/browse engine (`CommandService`), and the health state
 (`HealthState` → `HealthMetrics`).
 
+`HealthState` is the **single** per-instance state model: it answers `sb/status`, drives
+`southbound_health`, and renders the `state` keepalive's `instances[]` entry — including the
+`CONNECTING`/`ONLINE`/`BACKOFF`/`PAUSED` token (D-SC-7). Never add a second bookkeeping path for
+connection state; a pushed keepalive and a pulled `sb/status` must be incapable of disagreeing.
+
 Everything above the seam is protocol-free. The live Milo layer is the driver seam — replace-or-mock
 it, don't leak it upward: `CommandRouter`/`HealthState`/`ValueCodec`/the config model import nothing
 from Eclipse Milo's client.
 
 ## The `sb/*` command family (docs/SOUTHBOUND.md §2.2)
 
-`sb/status` (adds `paused`), `sb/browse` (hierarchical, `depth` 1..4 / `maxRefs` 1..1000 clamped),
+All ten verbs are `INSTANCE`-scoped (advertised as `describe.commands[].scope = "instance"`).
+`sb/status` (adds `state` + `paused`), `sb/browse` (hierarchical, `depth` 1..4 / `maxRefs` 1..1000 clamped),
 `sb/read` (ref-accepting, regex
 include/exclude), `sb/write` (confirmed, allow-listed batch), `sb/signals` (configured inventory +
 `writable` flag), `sb/rescan`, plus the lifecycle-control family `sb/pause` / `sb/resume` (idempotent
@@ -73,7 +81,8 @@ schema and are not redeclared here. See `docs/reference/configuration.md` and
   seam via fakes) and enforces the org **90% line-coverage** gate (JaCoCo `check`). The gate's
   `<excludes>` scope out **only** the live Milo driver seam + `main()` bootstrap
   (`OpcUaAdapter`, `OpcUaConnection`, `AddressSpaceBrowser`, `SubscriptionManager`,
-  `SignalUpdatePublisher`, `CommandService`, `OpcUaDevice`, `CommandRegistry`, `opc/security/**`) —
+  `SignalUpdatePublisher`, `CommandService`, `OpcUaDevice`, `opc/security/**`; `CommandRegistry`
+  stays in the gate) —
   code that cannot run without a live OPC UA session and a running EdgeCommons, validated on real
   infrastructure. Every broker-free decision stays in the gate and is unit-tested. Don't lower the gate
   or widen the excludes to pass — add tests.
