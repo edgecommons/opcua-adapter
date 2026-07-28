@@ -7,7 +7,7 @@
 - **Toolchain (this machine).** JDK 25 + Maven live under `C:\Users\breis\tools\{jdk,maven}` (not on
   PATH). Build with `JAVA_HOME=C:\Users\breis\tools\jdk` and `C:\Users\breis\tools\maven\bin\mvn`.
 - **Build against the sibling core library.** Maven resolves `com.mbreissi.edgecommons:edgecommons`
-  from GitHub Packages by version (`edgecommons.version`, default `0.3.0`). For local core work,
+  from GitHub Packages by version (`edgecommons.version`, default `0.5.0`). For local core work,
   `cd ../core/libs/java && mvn install -DskipTests`, then build here with
   `mvn -Dedgecommons.version=<the version that install printed> package` — Maven's local-repo-first
   resolution then satisfies it from `~/.m2` without contacting GitHub Packages. There is no

@@ -8,19 +8,26 @@ import java.util.Map;
 
 /**
  * The pure, protocol-free dispatcher behind the component-level {@code sb/*} command surface: it owns
- * instance routing (D‑EIP‑13 / D‑U28 — the topic-addressed instance from the scoped registration is
- * authoritative over the {@code body.instance} selector), the standardized error-code family, the
- * lifecycle-verb reply shapes, the {@code repoll}-while-paused refusal, and the per-verb
- * command-metric recording — all written against the {@link DeviceSession} seam so it is unit-tested
- * with a fake session, no live OPC UA server required.
+ * the component-side half of instance resolution (the configured default and the existence check —
+ * SOUTHBOUND.md §2.2 / D‑SC‑4), the standardized error-code family, the lifecycle-verb reply shapes,
+ * the {@code repoll}-while-paused refusal, and the per-verb command-metric recording — all written
+ * against the {@link DeviceSession} seam so it is unit-tested with a fake session, no live OPC UA
+ * server required.
+ *
+ * <p><b>Addressing is the library's.</b> Every {@code sb/*} verb declares
+ * {@link com.mbreissi.edgecommons.commands.CommandScope#INSTANCE}, so the command inbox extracts the
+ * delivery topic's {@code {instance}} token and the body's {@code instance} field, refuses a conflict
+ * between the two with {@code BAD_ARGS} <i>before</i> dispatch, and hands each handler the resolved
+ * {@code addressedInstance} (topic token, else body field, else {@code null}). This class therefore
+ * never parses a topic or a body selector — it starts from that token.
  *
  * <p>{@link CommandRegistry} wires these methods onto the library command inbox; this class never
  * touches the inbox, Milo, or the messaging layer.
  *
  * <h2>Standardized error codes (SOUTHBOUND.md §2.2)</h2>
  * <ul>
- *   <li>{@link #ERR_NO_SUCH_INSTANCE} — the request named an instance that is not configured/connected.</li>
- *   <li>{@link #ERR_BAD_ARGS} — a missing instance selector when several are configured, or a malformed
+ *   <li>{@link #ERR_NO_SUCH_INSTANCE} — the request addressed an instance that is not configured/connected.</li>
+ *   <li>{@link #ERR_BAD_ARGS} — no addressed instance when several are connected, or a malformed
  *       argument.</li>
  *   <li>{@link #ERR_PAUSED} — a whole-operation the paused state prohibits ({@code repoll} while
  *       paused).</li>
@@ -33,7 +40,7 @@ public class CommandRouter {
     /** Error code: the request named (or defaulted to) an instance that is not configured/connected. */
     public static final String ERR_NO_SUCH_INSTANCE = "NO_SUCH_INSTANCE";
 
-    /** Error code: a malformed argument, a missing instance selector, or a nonsensical request. */
+    /** Error code: a malformed argument, an unaddressed multi-instance request, or a nonsensical request. */
     public static final String ERR_BAD_ARGS = "BAD_ARGS";
 
     /** Error code: a whole-operation the paused state prohibits ({@code repoll} while paused). */
@@ -57,29 +64,23 @@ public class CommandRouter {
     }
 
     /**
-     * Route to the addressed device (SOUTHBOUND.md §2.2 / D‑U28). The <b>topic-addressed instance</b>
-     * (the {@code {instance}} token of an instance-scoped delivery topic, handed through by
-     * {@code registerScoped}) is authoritative: when {@code body.instance} is also present and
-     * disagrees, the request is refused with {@link #ERR_BAD_ARGS}; when only the topic token is
-     * present, it routes; an unknown topic-addressed instance is {@link #ERR_NO_SUCH_INSTANCE}. For
-     * a component-scoped delivery ({@code addressedInstance == null}) routing falls to the body:
-     * {@code body.instance} is optional iff exactly one device is connected; with two or more a
-     * missing selector is {@link #ERR_BAD_ARGS} and an unknown id is {@link #ERR_NO_SUCH_INSTANCE}.
-     * When none are connected yet, {@link #ERR_NO_SUCH_INSTANCE}.
+     * Resolve the addressed device — the component-side half of the addressing contract
+     * (SOUTHBOUND.md §2.2 / D‑SC‑4). The library has already resolved {@code addressedInstance} from
+     * the delivery topic or the request body and rejected any conflict between the two; what is left
+     * needs <i>this adapter's configuration</i>, which the library does not have:
+     *
+     * <ul>
+     *   <li>an addressed instance that names no connected device is {@link #ERR_NO_SUCH_INSTANCE};</li>
+     *   <li>no addressed instance at all resolves to the sole connected device when exactly one is
+     *       connected (the optional-iff-one default), is {@link #ERR_BAD_ARGS} when several are, and
+     *       is {@link #ERR_NO_SUCH_INSTANCE} when none has connected yet.</li>
+     * </ul>
+     *
+     * @param addressedInstance the library-resolved addressed instance, or {@code null} when the
+     *                          command named no instance on the topic or in the body
      */
-    public synchronized DeviceSession resolve(JsonObject body, String addressedInstance)
-            throws CommandException {
-        String instance = instanceOf(body);
-        if (addressedInstance != null) {
-            if (instance != null && !instance.equals(addressedInstance)) {
-                throw new CommandException(ERR_BAD_ARGS, "body field `instance` ('" + instance
-                        + "') conflicts with the topic-addressed instance ('" + addressedInstance
-                        + "') - the addressed instance is authoritative; drop the body field or make"
-                        + " them agree");
-            }
-            instance = addressedInstance;
-        }
-        if (instance == null) {
+    public synchronized DeviceSession resolve(String addressedInstance) throws CommandException {
+        if (addressedInstance == null) {
             if (devices.size() == 1) {
                 return devices.values().iterator().next();
             }
@@ -89,37 +90,30 @@ public class CommandRouter {
             throw new CommandException(ERR_BAD_ARGS, "field `instance` is required when multiple instances"
                     + " are connected (" + devices.keySet() + ")");
         }
-        DeviceSession device = devices.get(instance);
+        DeviceSession device = devices.get(addressedInstance);
         if (device == null) {
-            throw new CommandException(ERR_NO_SUCH_INSTANCE, "instance '" + instance
+            throw new CommandException(ERR_NO_SUCH_INSTANCE, "instance '" + addressedInstance
                     + "' is not connected (connected: " + devices.keySet() + ")");
         }
         return device;
     }
 
-    private static String instanceOf(JsonObject body) {
-        if (body != null && body.has("instance") && !body.get("instance").isJsonNull()) {
-            return body.get("instance").getAsString();
-        }
-        return null;
-    }
+    // ---- verb dispatch (resolve → call → record → reply) -----------------------------------------
+    // Every verb takes the library-resolved addressed instance (null when the command named none),
+    // plus the request body where the verb itself has arguments.
 
-    // ---- verb dispatch (route → call → record → reply) -------------------------------------------
-    // Every verb takes the request body plus the topic-addressed instance token (null when the
-    // command was addressed component-scope) — the CommandInbox's registerScoped hands it through.
-
-    public JsonObject status(JsonObject body, String addressedInstance) throws CommandException {
-        DeviceSession d = resolve(body, addressedInstance);
+    public JsonObject status(String addressedInstance) throws CommandException {
+        DeviceSession d = resolve(addressedInstance);
         return record(d, d.status());
     }
 
-    public JsonObject signals(JsonObject body, String addressedInstance) throws CommandException {
-        DeviceSession d = resolve(body, addressedInstance);
+    public JsonObject signals(String addressedInstance) throws CommandException {
+        DeviceSession d = resolve(addressedInstance);
         return record(d, d.signals());
     }
 
     public JsonObject browse(JsonObject body, String addressedInstance) throws Exception {
-        DeviceSession d = resolve(body, addressedInstance);
+        DeviceSession d = resolve(addressedInstance);
         try {
             JsonObject out = d.browse(body);
             d.recordCommand(true);
@@ -131,7 +125,7 @@ public class CommandRouter {
     }
 
     public JsonObject read(JsonObject body, String addressedInstance) throws Exception {
-        DeviceSession d = resolve(body, addressedInstance);
+        DeviceSession d = resolve(addressedInstance);
         try {
             JsonObject out = d.read(body);
             d.recordCommand(true);
@@ -143,31 +137,31 @@ public class CommandRouter {
     }
 
     public JsonObject write(JsonObject body, String addressedInstance) throws CommandException {
-        DeviceSession d = resolve(body, addressedInstance);
+        DeviceSession d = resolve(addressedInstance);
         return record(d, d.write(body));
     }
 
-    public JsonObject rescan(JsonObject body, String addressedInstance) throws CommandException {
-        DeviceSession d = resolve(body, addressedInstance);
+    public JsonObject rescan(String addressedInstance) throws CommandException {
+        DeviceSession d = resolve(addressedInstance);
         return record(d, d.rescan());
     }
 
-    public JsonObject pause(JsonObject body, String addressedInstance) throws CommandException {
-        DeviceSession d = resolve(body, addressedInstance);
+    public JsonObject pause(String addressedInstance) throws CommandException {
+        DeviceSession d = resolve(addressedInstance);
         boolean changed = d.pause();
         d.recordCommand(true);
         return lifecycle(d.id(), "paused", true, changed);
     }
 
-    public JsonObject resume(JsonObject body, String addressedInstance) throws CommandException {
-        DeviceSession d = resolve(body, addressedInstance);
+    public JsonObject resume(String addressedInstance) throws CommandException {
+        DeviceSession d = resolve(addressedInstance);
         boolean changed = d.resume();
         d.recordCommand(true);
         return lifecycle(d.id(), "paused", false, changed);
     }
 
-    public JsonObject reconnect(JsonObject body, String addressedInstance) throws CommandException {
-        DeviceSession d = resolve(body, addressedInstance);
+    public JsonObject reconnect(String addressedInstance) throws CommandException {
+        DeviceSession d = resolve(addressedInstance);
         try {
             boolean connected = d.reconnect();
             d.recordCommand(true);
@@ -181,8 +175,8 @@ public class CommandRouter {
         }
     }
 
-    public JsonObject repoll(JsonObject body, String addressedInstance) throws CommandException {
-        DeviceSession d = resolve(body, addressedInstance);
+    public JsonObject repoll(String addressedInstance) throws CommandException {
+        DeviceSession d = resolve(addressedInstance);
         if (d.isPaused()) {
             d.recordCommand(false);
             throw new CommandException(ERR_PAUSED, "instance is paused - resume before repolling");

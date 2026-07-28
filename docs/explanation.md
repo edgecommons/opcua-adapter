@@ -32,6 +32,12 @@ state the moment its session drops or recovers, so a server that dies *mid-sessi
 `connected:false` in `state.instances[]` and raises `evt/critical/connection-lost` — with no active
 probe.
 
+A boolean alone, though, cannot tell an operator *why* a server is quiet. Each instance therefore also
+reports a condition token — `CONNECTING`, `ONLINE`, `BACKOFF`, or `PAUSED` — on the keepalive entry
+and in the `sb/status` reply. Both surfaces read the one per-instance state model (`HealthState`), so
+a pushed keepalive and a pulled status can never disagree, and an instance a person deliberately
+paused is distinguishable from one that silently went stale.
+
 ## Inside an instance: a small set of collaborators
 
 The adapter is a set of focused collaborators,

@@ -77,9 +77,8 @@ verb's argument object. A EdgeCommons client's `request()` API sets `header.name
   metric subsystem, not a raw publish.
 - **The command inbox is one per component and subscribes both command scopes** —
   component-scope (`ecv1/{device}/{component}/cmd/#`) and instance-scope
-  (`ecv1/{device}/{component}/+/cmd/#`). A command addressed with an `{instance}` topic token routes
-  to that device instance; a component-scoped command routes by the request's `instance` body field
-  (see below).
+  (`ecv1/{device}/{component}/+/cmd/#`). Every `sb/*` verb is instance-scoped: the addressed instance
+  is the `{instance}` topic token, else the request's `instance` body field (see below).
 
 ## The command surface — `cmd/sb/*` verbs
 
@@ -94,33 +93,38 @@ body:
 
 The reply's `header.name` is the verb (e.g. `sb/write`), with the request's `correlation_id`.
 
-**Instance addressing.** The adapter is multi-instance behind one per-component inbox; a request
-selects its target device instance in either of two ways:
+**Verb scope.** Every verb declares its scope at registration, and the scope is advertised in the
+`describe` reply (`commands[].scope`) so a console knows whether to offer an instance selector. All
+ten `sb/*` verbs below are **`instance`**-scoped — each one acts on exactly one OPC UA server.
+
+**Instance addressing.** The adapter is multi-instance behind one per-component inbox. The addressed
+instance is resolved before the verb runs:
 
 - **Topic-addressed (instance scope).** Send the command to
-  `ecv1/{device}/{component}/{instance}/cmd/sb/{verb}` — the `{instance}` topic token routes the
-  request and is **authoritative**: a `body.instance` that disagrees with it is refused with
-  `BAD_ARGS` (drop the body field or make them agree); with only the topic token present, it routes.
-- **Component-scoped body selector.** Send the command to
-  `ecv1/{device}/{component}/cmd/sb/{verb}` with an **`"instance"`** body field naming the target.
-  When exactly one instance is connected the field may be omitted (it defaults to that instance);
-  with several connected, omitting it returns `BAD_ARGS`.
+  `ecv1/{device}/{component}/{instance}/cmd/sb/{verb}` — the `{instance}` topic token is the
+  addressed instance.
+- **Body selector.** Send the command to `ecv1/{device}/{component}/cmd/sb/{verb}` with an
+  **`"instance"`** body field naming the target.
+- **Conflict.** A `body.instance` that disagrees with the `{instance}` topic token is refused with
+  `BAD_ARGS` before the verb runs — drop the body field or make them agree.
+- **Neither.** When exactly one instance is connected, an unaddressed request defaults to it; with
+  several connected it returns `BAD_ARGS`.
 
-Either way, naming an unconnected/unknown instance (or when none is connected) returns
+Naming an unconnected/unknown instance (or addressing the adapter when none is connected) returns
 `NO_SUCH_INSTANCE`.
 
-| Verb | Kind | Purpose |
-|------|------|---------|
-| `sb/status` | request/reply | instance/connection status + counters (includes `paused`) |
-| `sb/browse` | request/reply | browse hierarchical address-space references |
-| `sb/read` | request/reply | on-demand read (explicit list and/or regex include/exclude) |
-| `sb/write` | request/reply, **confirmed** | allow-listed batch write, per-entry ack |
-| `sb/signals` | request/reply | the currently resolved/subscribed signals (each with `writable`) |
-| `sb/rescan` | request/reply | re-browse the address space and refresh the node cache |
-| `sb/pause` | request/reply, **confirmed** | suspend publishing for the instance (idempotent) |
-| `sb/resume` | request/reply, **confirmed** | resume publishing for the instance (idempotent) |
-| `reconnect` | request/reply, **confirmed** | drop and re-establish the OPC UA session |
-| `repoll` | request/reply, **confirmed** | immediately read every subscribed signal and republish on `data` |
+| Verb | Scope | Kind | Purpose |
+|------|-------|------|---------|
+| `sb/status` | `instance` | request/reply | instance/connection status + counters (includes `state` and `paused`) |
+| `sb/browse` | `instance` | request/reply | browse hierarchical address-space references |
+| `sb/read` | `instance` | request/reply | on-demand read (explicit list and/or regex include/exclude) |
+| `sb/write` | `instance` | request/reply, **confirmed** | allow-listed batch write, per-entry ack |
+| `sb/signals` | `instance` | request/reply | the currently resolved/subscribed signals (each with `writable`) |
+| `sb/rescan` | `instance` | request/reply | re-browse the address space and refresh the node cache |
+| `sb/pause` | `instance` | request/reply, **confirmed** | suspend publishing for the instance (idempotent) |
+| `sb/resume` | `instance` | request/reply, **confirmed** | resume publishing for the instance (idempotent) |
+| `reconnect` | `instance` | request/reply, **confirmed** | drop and re-establish the OPC UA session |
+| `repoll` | `instance` | request/reply, **confirmed** | immediately read every subscribed signal and republish on `data` |
 
 The library also provides the built-in verbs `ping`, `reload-config`, and `get-configuration` on the
 same inbox (out of the box; not southbound-specific).
@@ -270,13 +274,15 @@ Request body `{ "instance": "kep1" }` (optional selector). Result:
 
 ```jsonc
 { "ok": true, "result": {
-    "id": "kep1", "connected": true, "paused": false,
+    "id": "kep1", "connected": true, "state": "ONLINE", "paused": false,
     "metrics": {
       "subscribedRead": { "interval": 1234, "total": 98765 },
       "readRequest": { "interval": 2, "total": 40 },
       "writeRequest": { "interval": 1, "total": 12 } } } }
 ```
-`connected` is the OPC UA session state; `paused` is `true` while publishing is suspended for the
+`connected` is the OPC UA session state; `state` is the richer condition token
+(`CONNECTING` | `ONLINE` | `BACKOFF` | `PAUSED` — the same value the `state` keepalive reports for
+this instance); `paused` is `true` while publishing is suspended for the
 instance (see `sb/pause`/`sb/resume`). `subscribedRead` counts data-change samples from active
 subscriptions, `readRequest` counts explicit `sb/read` samples returned, and `writeRequest` counts
 explicit `sb/write` attempts issued to the server. The status reply also includes the operational
@@ -472,8 +478,9 @@ under the one component — no phantom UNS instance per server.
   "status": "RUNNING",
   "uptimeSecs": 3600,
   "instances": [
-    { "instance": "kep1", "connected": true,  "detail": "opc.tcp://host:49320/" },
-    { "instance": "plc2", "connected": false, "detail": "opc.tcp://plc2:4840/" }
+    { "instance": "kep1", "connected": true,  "state": "ONLINE",  "detail": "opc.tcp://host:49320/" },
+    { "instance": "line3", "connected": true, "state": "PAUSED",  "detail": "opc.tcp://line3:4840/" },
+    { "instance": "plc2", "connected": false, "state": "BACKOFF", "detail": "opc.tcp://plc2:4840/" }
   ]
 }
 ```
@@ -482,11 +489,14 @@ under the one component — no phantom UNS instance per server.
 |-------|-------|
 | `instance` | the configured device instance id (`instances[].id`) |
 | `connected` | that server's **live** OPC UA session state — a server that has not yet (re)connected, or one whose session died mid-session, reads `false` (kept live event-driven, no polling; see [explanation.md](../explanation.md)) |
+| `state` | the richer condition token: `CONNECTING` (coming up, never been connected), `ONLINE`, `BACKOFF` (was up, session lost, re-establishing), or `PAUSED` (connected, but publishing suspended by `sb/pause`). A break while paused reads `BACKOFF`, so `connected` and `state` never disagree |
 | `detail` | the server's OPC UA endpoint URL; a server that has *never* connected yet reports `connected:false` with no `detail` |
 
 `instances[]` is the **passive / observable** counterpart to the `sb/status` verb: `sb/status` is a
 pull (request/reply) for one instance's connection + counters, while the keepalive pushes every
-server's `connected` flag on every RUNNING tick with no request. It rides the RUNNING keepalive
+server's `connected` flag and `state` on every RUNNING tick with no request. Both read the same
+per-server state model, so the pushed and the pulled view always agree — a deliberately paused
+instance is distinguishable from one that silently went quiet. It rides the RUNNING keepalive
 **only** (a `STOPPED` state carries no live instances).
 
 ## CLI

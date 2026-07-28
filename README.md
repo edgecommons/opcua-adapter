@@ -41,9 +41,9 @@ Full operator/integrator docs are in **[`docs/`](docs/)**, organized by [Diátax
   `sb/signals` (the configured inventory, each entry flagged `writable`), `sb/status`, `sb/rescan`, and
   the lifecycle-control verbs `sb/pause` / `sb/resume` (idempotent `{paused, changed}`), `reconnect`
   (`{connected}`), and `repoll` (`{polled}` — an immediate explicit read + republish, refused while
-  paused with `PAUSED`). Multi-instance requests target a device instance by the `{instance}` topic
-  token (authoritative; a conflicting body selector is `BAD_ARGS`) or, component-scoped, by an
-  `instance` body selector; standardized error codes
+  paused with `PAUSED`). Every verb is **instance-scoped**: a request targets a device instance by the
+  `{instance}` topic token or by an `instance` body selector (the two must agree, else `BAD_ARGS`),
+  and an unaddressed request defaults to the sole connected instance; standardized error codes
   (`NO_SUCH_INSTANCE`, `BAD_ARGS`, `PAUSED`, `WRITE_NOT_ALLOWED`, `RECONNECT_FAILED`,
   `DEVICE_UNAVAILABLE`, …).
 - **Edge-console panels** — an `overview` / `signals` / `diagnostics` / `address-space` panel trio
