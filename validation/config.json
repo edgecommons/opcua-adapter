@@ -63,6 +63,10 @@
                   "type": "None",
                   "value": 0.0
                 }
+              },
+              {
+                "namespaceUri": "urn:edgecommons:sim",
+                "match": "Setpoint"
               }
             ],
             "exclude": []

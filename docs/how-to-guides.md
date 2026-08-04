@@ -230,3 +230,18 @@ from the Downward API — typically no args). See the scaffold's `Dockerfile` an
   just alarms).
 - **Logs:** each subsystem logs under its own name with the `[<instanceId>]` prefix; raise detail with
   `logging.level`.
+
+## Seeing the shutdown sequence in the logs
+
+On termination the adapter closes each device in order — stop the tick, delete the server-side
+subscriptions, flush what is buffered, drop the OPC UA session — and logs each step.
+
+Log4j installs its own JVM shutdown hook, which runs concurrently with that teardown and stops the
+logger context. The later teardown lines are then discarded before they reach the log, so a normal
+shutdown can appear to stop after `closing device`. To capture the full sequence, disable that hook:
+
+```bash
+java -Dlog4j2.shutdownHookEnabled=false -jar opcua-adapter-1.0.0.jar ...
+```
+
+The teardown itself is unaffected either way — only whether you can read about it afterwards.

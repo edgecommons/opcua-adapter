@@ -465,7 +465,9 @@ public class CommandService {
             for (int i = 0; i < nodeIds.size(); i++) {
                 NodeId nodeId = nodeIds.get(i);
                 JsonObject signal = new JsonObject();
-                signal.addProperty("id", nodeId.toParseableString());
+                // The same canonical, stable id the telemetry body and sb/signals publish — a read
+                // reply must not hand back a namespace-index form the caller cannot key on.
+                signal.addProperty("id", canonicalIdOf(nodeId));
                 signal.add("address", ValueCodec.address(nodeId, client.getNamespaceTable()));
                 JsonObject read = ValueCodec.toSample(values.get(i), receivedAt);
                 read.add("signal", signal);
@@ -480,6 +482,20 @@ public class CommandService {
             counters.recordReadFailure();
             counters.incrementReadErrors();
             throw e;
+        }
+    }
+
+    /**
+     * The canonical {@code signal.id} for a node id. A node in a namespace the server does not declare
+     * has no stable identity; its parseable form is returned so the entry is still addressable, rather
+     * than failing the whole read.
+     */
+    private String canonicalIdOf(NodeId nodeId) {
+        try {
+            return CanonicalSignalId.of(nodeId, client.getNamespaceTable()).toString();
+        } catch (RuntimeException e) {
+            LOGGER.debug("[{}] no stable identity for {}: {}", serverConfig.getId(), nodeId, e.getMessage());
+            return nodeId.toParseableString();
         }
     }
 
