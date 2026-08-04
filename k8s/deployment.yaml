@@ -53,7 +53,7 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
           volumeMounts:
-            - { name: config, mountPath: /etc/edgecommons, readOnly: true }   # WHOLE volume, never subPath (hot-reload)
+            - { name: config, mountPath: /etc/edgecommons, readOnly: true }   # WHOLE volume, never subPath
             - { name: tmp, mountPath: /tmp }
       volumes:
         - name: config

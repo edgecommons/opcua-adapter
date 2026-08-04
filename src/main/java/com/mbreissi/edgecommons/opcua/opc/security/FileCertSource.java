@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
+import java.util.List;
 
 /** Client identity from PEM files on disk ({@code certPath} + {@code keyPath}). */
 public final class FileCertSource implements CertSource {
@@ -19,8 +20,8 @@ public final class FileCertSource implements CertSource {
 
     @Override
     public ClientIdentity load() throws Exception {
-        X509Certificate cert = Pem.certificate(Files.readString(certPath));
+        List<X509Certificate> chain = Pem.certificateChain(Files.readString(certPath));
         PrivateKey key = Pem.privateKey(Files.readString(keyPath));
-        return ClientIdentity.of(cert, new KeyPair(cert.getPublicKey(), key));
+        return ClientIdentity.of(chain, new KeyPair(chain.get(0).getPublicKey(), key));
     }
 }

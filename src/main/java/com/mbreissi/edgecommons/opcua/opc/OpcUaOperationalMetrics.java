@@ -58,6 +58,8 @@ public class OpcUaOperationalMetrics {
                 .addMeasure("SubscribedReadInterval", "Count", 60)
                 .addMeasure("SubscriptionRecreateTotal", "Count", 60)
                 .addMeasure("SubscriptionRecreateInterval", "Count", 60)
+                .addMeasure("DroppedSampleTotal", "Count", 60)
+                .addMeasure("DroppedSampleInterval", "Count", 60)
                 .addMeasure("SubscriptionCount", "Count", 1)
                 .addMeasure("MonitoredItemCount", "Count", 1)
                 .addDimension("instance", instanceId)

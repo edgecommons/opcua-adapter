@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.mbreissi.edgecommons.commands.CommandException;
 import com.mbreissi.edgecommons.facades.EventsFacade;
 import com.mbreissi.edgecommons.facades.Severity;
+import com.mbreissi.edgecommons.opcua.opc.config.AdapterLimits;
 import com.mbreissi.edgecommons.opcua.opc.config.ServerConfiguration;
 import com.mbreissi.edgecommons.opcua.opc.config.SignalSpec;
 import org.apache.logging.log4j.LogManager;
@@ -37,6 +38,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
@@ -79,10 +81,20 @@ public class CommandService {
     private final Map<NodeId, UaVariableNode> allNodes;
     private final EventsFacade events;
     private final HealthState health;
+    private final AdapterLimits limits;
+    private final int serverMaxNodesPerRead;
+    private final int serverMaxNodesPerWrite;
 
     public CommandService(OpcUaClient client, ServerConfiguration serverConfig, ClientMetrics counters,
                           BooleanSupplier connected, Supplier<Map<String, ResolvedSignal>> resolvedSignals,
                           Map<NodeId, UaVariableNode> allNodes, EventsFacade events, HealthState health) {
+        this(client, serverConfig, counters, connected, resolvedSignals, allNodes, events, health, 0, 0);
+    }
+
+    public CommandService(OpcUaClient client, ServerConfiguration serverConfig, ClientMetrics counters,
+                          BooleanSupplier connected, Supplier<Map<String, ResolvedSignal>> resolvedSignals,
+                          Map<NodeId, UaVariableNode> allNodes, EventsFacade events, HealthState health,
+                          int serverMaxNodesPerRead, int serverMaxNodesPerWrite) {
         this.client = client;
         this.serverConfig = serverConfig;
         this.counters = counters;
@@ -91,6 +103,9 @@ public class CommandService {
         this.allNodes = allNodes;
         this.events = events;
         this.health = health;
+        this.limits = serverConfig.getLimits();
+        this.serverMaxNodesPerRead = serverMaxNodesPerRead;
+        this.serverMaxNodesPerWrite = serverMaxNodesPerWrite;
     }
 
     // ---- sb/status -------------------------------------------------------------------------------
@@ -117,7 +132,7 @@ public class CommandService {
         JsonArray signals = new JsonArray();
         resolvedSignals.get().forEach((signalId, rt) -> {
             JsonObject t = new JsonObject();
-            t.addProperty("signalId", signalId);
+            t.addProperty("signalId", rt.signalId());
             t.addProperty("idType", ValueCodec.idTypeName(rt.nodeId()));
             int idx = rt.nodeId().getNamespaceIndex().intValue();
             t.addProperty("namespace", idx);
@@ -126,8 +141,8 @@ public class CommandService {
                 t.addProperty("namespaceUri", uri);
             }
             t.addProperty("match", rt.spec().getMatch());
-            // The stable signal.id (parseable ns=…;…=… form, as published) is what writes.allow[] matches.
-            t.addProperty("writable", serverConfig.isWriteAllowed(rt.nodeId().toParseableString()));
+            // The stable signal.id (canonical nsu=… form, as published) is what writes.allow[] matches.
+            t.addProperty("writable", serverConfig.isWriteAllowed(rt.canonicalId()));
             signals.add(t);
         });
         result.add("signals", signals);
@@ -403,6 +418,7 @@ public class CommandService {
                 Map<SignalSpec, Integer> excludeNs = new HashMap<>();
                 excludeSpecs.forEach(spec -> excludeNs.put(spec, SignalMatching.resolveNamespace(spec, table)));
 
+                try {
                 for (UaVariableNode node : allNodes.values()) {
                     String idStr = node.getNodeId().getIdentifier().toString();
                     String browseName = node.getBrowseName() != null && node.getBrowseName().getName() != null
@@ -421,12 +437,21 @@ public class CommandService {
                     }
                     includeMatched.add(node.getNodeId());
                 }
+                } catch (SafeRegex.BudgetExceededException e) {
+                    LOGGER.warn("[{}] read include/exclude abandoned: {}", serverConfig.getId(), e.getMessage());
+                    throw new CommandException(CommandRouter.ERR_BAD_ARGS, e.getMessage());
+                }
             }
 
             List<NodeId> nodeIds = CommandCodec.mergeReadTargets(explicit, includeMatched);
-            List<DataValue> values = nodeIds.isEmpty()
-                    ? new ArrayList<>()
-                    : client.readValuesAsync(0.0, TimestampsToReturn.Both, nodeIds).get();
+            if (nodeIds.size() > limits.getMaxReadTargets()) {
+                // Refused rather than clamped: a silently partial read reports values for a subset of
+                // what was asked for, with no way for the caller to tell.
+                throw new CommandException(CommandRouter.ERR_BAD_ARGS, "read requests " + nodeIds.size()
+                        + " signals; the limit is " + limits.getMaxReadTargets()
+                        + " (raise component.global.limits.maxReadTargets to allow more)");
+            }
+            List<DataValue> values = readChunked(nodeIds);
             // The adapter-receive moment for the whole batch: the read just completed, so this is
             // when these values arrived from the mediating server (→ each sample's receivedTs).
             Instant receivedAt = Instant.now();
@@ -458,6 +483,38 @@ public class CommandService {
         }
     }
 
+    /**
+     * Read values in chunks no larger than the server's {@code MaxNodesPerRead}, under a deadline.
+     *
+     * <p>Both bounds matter: an unbounded batch can exceed what the server will accept in one call, and
+     * an unbounded {@code get()} leaves the command thread parked forever when the session stalls.
+     */
+    public List<DataValue> readChunked(List<NodeId> nodeIds) throws Exception {
+        List<DataValue> values = new ArrayList<>(nodeIds.size());
+        if (nodeIds.isEmpty()) {
+            return values;
+        }
+        int chunk = Batching.effectiveChunk(serverMaxNodesPerRead, limits.getChunkSize());
+        for (List<NodeId> part : Batching.partition(nodeIds, chunk)) {
+            values.addAll(client.readValuesAsync(0.0, TimestampsToReturn.Both, part)
+                    .get(limits.getCommandTimeoutMs(), TimeUnit.MILLISECONDS));
+        }
+        return values;
+    }
+
+    /** Write values in chunks no larger than the server's {@code MaxNodesPerWrite}, under a deadline. */
+    private List<StatusCode> writeChunked(List<NodeId> nodeIds, List<DataValue> dataValues) throws Exception {
+        List<StatusCode> results = new ArrayList<>(nodeIds.size());
+        int chunk = Batching.effectiveChunk(serverMaxNodesPerWrite, limits.getChunkSize());
+        List<List<NodeId>> idChunks = Batching.partition(nodeIds, chunk);
+        List<List<DataValue>> valueChunks = Batching.partition(dataValues, chunk);
+        for (int i = 0; i < idChunks.size(); i++) {
+            results.addAll(client.writeValuesAsync(idChunks.get(i), valueChunks.get(i))
+                    .get(limits.getCommandTimeoutMs(), TimeUnit.MILLISECONDS));
+        }
+        return results;
+    }
+
     // ---- sb/write --------------------------------------------------------------------------------
 
     /**
@@ -470,7 +527,7 @@ public class CommandService {
      * {@code evt/warning/write-rejected} — the whole batch is not failed, so allowed writes still
      * proceed.
      */
-    public JsonObject write(JsonObject payload) {
+    public JsonObject write(JsonObject payload) throws CommandException {
         JsonArray writes;
         if (payload != null && payload.has("writes")) {
             writes = payload.getAsJsonArray("writes");
@@ -479,6 +536,11 @@ public class CommandService {
             if (payload != null) {
                 writes.add(payload);
             }
+        }
+        if (writes.size() > limits.getMaxWriteTargets()) {
+            throw new CommandException(CommandRouter.ERR_BAD_ARGS, "write requests " + writes.size()
+                    + " entries; the limit is " + limits.getMaxWriteTargets()
+                    + " (raise component.global.limits.maxWriteTargets to allow more)");
         }
 
         List<JsonObject> perEntry = new ArrayList<>();
@@ -507,11 +569,20 @@ public class CommandService {
                 markWriteFailed(coords, e.getMessage());
                 continue;
             }
-            // D-U16 allow-list: match the target's stable signal.id (the parseable ns=…;…=… form, as
+            // D-U16 allow-list: match the target's stable signal.id (the canonical nsu=… form, as
             // published) against writes.allow[]. A rejected target is confirmed FAILED and surfaced as
             // an operator event, but does not fail the sibling (allowed) writes in the batch.
-            String stableId = nodeId.toParseableString();
-            if (!serverConfig.isWriteAllowed(stableId)) {
+            CanonicalSignalId canonicalId;
+            try {
+                canonicalId = CanonicalSignalId.of(nodeId, client.getNamespaceTable());
+            } catch (RuntimeException e) {
+                LOGGER.error("[{}] write target {} has no stable identity: {}",
+                        serverConfig.getId(), nodeId, e.getMessage());
+                markWriteFailed(coords, e.getMessage());
+                continue;
+            }
+            String stableId = canonicalId.toString();
+            if (!serverConfig.isWriteAllowed(canonicalId)) {
                 LOGGER.warn("[{}] write to {} rejected: not in writes.allow[]", serverConfig.getId(), stableId);
                 markWriteFailed(coords, WRITE_NOT_ALLOWED);
                 emitWriteRejected(stableId);
@@ -530,9 +601,13 @@ public class CommandService {
                 markWriteFailed(coords, "target is not a variable");
                 continue;
             }
-            Variant variant = ValueCodec.variantFromValue(((UaVariableNode) node).getDataType(), w.get("value"));
-            if (variant == null) {
-                markWriteFailed(coords, "unsupported value type or coercion failed");
+            Variant variant;
+            try {
+                variant = ValueCodec.variantOrThrow(((UaVariableNode) node).getDataType(), w.get("value"));
+            } catch (RuntimeException e) {
+                // Carries the precise reason — an out-of-range value reads differently from an
+                // unsupported data type, and an operator needs to tell them apart.
+                markWriteFailed(coords, e.getMessage());
                 continue;
             }
             StatusCode statusCode = ValueCodec.statusFromString(w.has("status") ? w.get("status").getAsString() : "GOOD");
@@ -544,7 +619,7 @@ public class CommandService {
 
         if (!nodeIds.isEmpty()) {
             try {
-                List<StatusCode> results = client.writeValues(nodeIds, dataValues);
+                List<StatusCode> results = writeChunked(nodeIds, dataValues);
                 for (int j = 0; j < results.size(); j++) {
                     counters.recordWriteRequest();
                     StatusCode result = results.get(j);

@@ -44,7 +44,7 @@ public interface DeviceSession {
     JsonObject read(JsonObject body) throws Exception;
 
     /** {@code sb/write}: confirmed, allow-listed batch write. */
-    JsonObject write(JsonObject body);
+    JsonObject write(JsonObject body) throws CommandException;
 
     /** {@code sb/rescan}: re-browse the address space and refresh the node cache. */
     JsonObject rescan();

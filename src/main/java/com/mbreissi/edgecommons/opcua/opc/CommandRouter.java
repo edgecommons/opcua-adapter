@@ -104,12 +104,12 @@ public class CommandRouter {
 
     public JsonObject status(String addressedInstance) throws CommandException {
         DeviceSession d = resolve(addressedInstance);
-        return record(d, d.status());
+        return recorded(d, d::status);
     }
 
     public JsonObject signals(String addressedInstance) throws CommandException {
         DeviceSession d = resolve(addressedInstance);
-        return record(d, d.signals());
+        return recorded(d, d::signals);
     }
 
     public JsonObject browse(JsonObject body, String addressedInstance) throws Exception {
@@ -138,12 +138,12 @@ public class CommandRouter {
 
     public JsonObject write(JsonObject body, String addressedInstance) throws CommandException {
         DeviceSession d = resolve(addressedInstance);
-        return record(d, d.write(body));
+        return recorded(d, () -> d.write(body));
     }
 
     public JsonObject rescan(String addressedInstance) throws CommandException {
         DeviceSession d = resolve(addressedInstance);
-        return record(d, d.rescan());
+        return recorded(d, d::rescan);
     }
 
     public JsonObject pause(String addressedInstance) throws CommandException {
@@ -194,9 +194,26 @@ public class CommandRouter {
         }
     }
 
-    private static JsonObject record(DeviceSession d, JsonObject result) {
-        d.recordCommand(true);
-        return result;
+    /**
+     * Invoke a device call and record its outcome. The call is made <b>inside</b> the try so a thrown
+     * {@link RuntimeException} records a failure — evaluating it as an argument would let a crash go
+     * uncounted on the {@code OpcUaCommand} family.
+     */
+    private static JsonObject recorded(DeviceSession d, DeviceCall call) throws CommandException {
+        try {
+            JsonObject out = call.get();
+            d.recordCommand(true);
+            return out;
+        } catch (RuntimeException | CommandException e) {
+            d.recordCommand(false);
+            throw e;
+        }
+    }
+
+    /** A device call returning a verb result. */
+    @FunctionalInterface
+    private interface DeviceCall {
+        JsonObject get() throws CommandException;
     }
 
     private static JsonObject lifecycle(String id, String key, boolean value, boolean changed) {

@@ -77,7 +77,9 @@ Dimensions: `instance`.
 | `SubscriptionRecreateTotal` | Count | Lifetime subscription re-establishment attempts after transfer failure. Helps detect unstable sessions. |
 | `SubscriptionRecreateInterval` | Count | Subscription re-establishment attempts in the interval. Helps alert on active subscription churn. |
 | `SubscriptionCount` | Count | Active OPC UA subscription objects. Helps verify configured subscription grouping. |
-| `MonitoredItemCount` | Count | Resolved monitored signal count. Helps confirm the live subscription inventory. |
+| `MonitoredItemCount` | Count | Monitored items the server has confirmed. Helps confirm the live subscription inventory. Counts items the session actually serves, so a signal whose monitored item failed to create is not included. |
+| `DroppedSampleTotal` | Count | Lifetime samples discarded because a signal's publish buffer was full. Helps detect a downstream that cannot keep up with the subscription rate. |
+| `DroppedSampleInterval` | Count | Samples discarded in the interval. Helps alert on active backpressure loss. |
 
 ## `OpcUaBrowse`
 

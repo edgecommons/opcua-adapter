@@ -4,9 +4,17 @@ import com.mbreissi.edgecommons.opcua.opc.config.SignalSpec;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 
 /**
- * A signal that a subscription has bound to: the actual {@link NodeId} it resolved to (carrying the
- * current namespace index) plus the {@link SignalSpec} that selected it. Used for the {@code
- * subscriptions} control query.
+ * One subscribed signal: the live {@link NodeId} it is monitored by, the matcher that selected it, and
+ * its {@link CanonicalSignalId} — the stable identity it is published, inventoried, and authorized
+ * under.
+ *
+ * <p>The node id is session-scoped (its namespace index is only meaningful while this session lasts);
+ * the canonical id is not, which is why the inventory and staleness tracker key on the latter.
  */
-public record ResolvedSignal(NodeId nodeId, SignalSpec spec) {
+public record ResolvedSignal(NodeId nodeId, SignalSpec spec, CanonicalSignalId canonicalId) {
+
+    /** The canonical id in its wire form — the published {@code signal.id}. */
+    public String signalId() {
+        return canonicalId.toString();
+    }
 }

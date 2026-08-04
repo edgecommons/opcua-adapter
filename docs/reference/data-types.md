@@ -91,10 +91,18 @@ leaving the value unchanged. The `ExtensionObject` (structure) row is confirmed 
   `int_value`; `UInt64` values must fit signed 64-bit range on this path.
 - **`null` values.** A node with no value yields `EcValue.null_value`; diagnostic/read JSON renders
   `"value": null`.
+- **Write values are range-checked.** An integral write must fall inside the target type's range:
+  `300` written to an `SByte` is refused with `value 300 is out of range for SByte (-128..127)`, not
+  silently wrapped to `44`. The same applies to `Byte`, `Int16`, `UInt16`, `Int32`, and `UInt32`. A
+  non-integer value for an integral target is refused rather than truncated.
+- **Writing the full `UInt64` range.** Values above `9223372036854775807` cannot survive a JSON
+  number on the write path, so send them as a decimal **string**:
+  `{"signalId": "…", "value": "18446744073709551615"}`. Values within signed 64-bit range may be sent
+  as either a number or a string.
 - **Quality, not exceptions.** An unreadable or unknown node returns an entry with `quality` `BAD`
   (not an error); see the [sample object](messaging-interface.md#sample-object) and
-  [metrics](metrics.md#southbound_health). Type coercion that fails on write skips
-  only that entry.
+  [metrics](metrics.md#southbound_health). A write value that cannot be represented in the target
+  type fails only that entry, and the entry's `message` carries the reason.
 - **Timestamps ride beside the value.** Every sample carries the OPC UA SourceTimestamp as
   `sourceTs` (when the server supplied it) and the ServerTimestamp as `serverTs`, plus the
   adapter-receive timestamp `receivedTs` when it differs from `serverTs` — see the

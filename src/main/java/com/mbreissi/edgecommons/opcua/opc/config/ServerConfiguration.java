@@ -2,6 +2,7 @@ package com.mbreissi.edgecommons.opcua.opc.config;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.mbreissi.edgecommons.opcua.opc.CanonicalSignalId;
 import com.mbreissi.edgecommons.config.ConfigManager;
 
 import java.util.ArrayList;
@@ -38,6 +39,7 @@ public class ServerConfiguration {
     private final int defaultQueueSize;
     private final long batchMs;
     private final Set<String> writesAllow;
+    private final AdapterLimits limits;
     private final List<SubscriptionSpec> subscriptionSpecs = new ArrayList<>();
 
     public ServerConfiguration(ConfigManager config, JsonObject globalConfig, String instanceId) {
@@ -45,6 +47,8 @@ public class ServerConfiguration {
         JsonObject inst = config.getInstanceConfig(instanceId);
         this.id = inst.has("id") ? inst.get("id").getAsString() : instanceId;
         this.connection = new ConnectionInfo(inst.has("connection") ? inst.getAsJsonObject("connection") : new JsonObject());
+
+        this.limits = AdapterLimits.fromGlobal(globalConfig);
 
         JsonObject gDefaults = (globalConfig != null && globalConfig.has("defaults"))
                 ? globalConfig.getAsJsonObject("defaults") : new JsonObject();
@@ -63,7 +67,14 @@ public class ServerConfiguration {
         JsonObject writes = inst.has("writes") ? inst.getAsJsonObject("writes") : new JsonObject();
         if (writes.has("allow")) {
             for (JsonElement el : writes.getAsJsonArray("allow")) {
-                writesAllow.add(el.getAsString());
+                String entry = el.getAsString();
+                if ("*".equals(entry)) {
+                    writesAllow.add(entry);
+                    continue;
+                }
+                // Parsed eagerly so a malformed or index-bearing entry fails the instance at startup
+                // rather than silently never matching (or, worse, matching the wrong node later).
+                writesAllow.add(CanonicalSignalId.parse(entry).toString());
             }
         }
 
@@ -108,17 +119,26 @@ public class ServerConfiguration {
         return batchMs;
     }
 
+    /** The bounded-operation budgets from {@code component.global.browse} / {@code .limits}. */
+    public AdapterLimits getLimits() {
+        return limits;
+    }
+
     /**
-     * Whether {@code sb/write} may write the given <b>stable signal id</b> (the canonical
-     * {@code ns=<ns>;<type>=<id>} form as published in {@code signal.id}). A write is permitted iff
-     * the id is listed verbatim in {@code writes.allow[]} or the list contains the wildcard
+     * Whether {@code sb/write} may write the given <b>stable signal id</b> — the canonical
+     * {@code nsu=<namespaceUri>;<type>=<id>} form as published in {@code signal.id}. A write is
+     * permitted iff the id is listed in {@code writes.allow[]} or the list contains the wildcard
      * {@code "*"}. An absent/empty allow-list rejects every write (D‑U16; secure-by-default).
      *
-     * @param stableSignalId the target's stable {@code signal.id}
+     * <p>The key is deliberately namespace-<b>URI</b> based. A namespace index is a per-session handle:
+     * an index-keyed allow-list can refuse a legitimate write after the server renumbers, and can
+     * authorize a different node that has taken over the old index.
+     *
+     * @param signalId the target's canonical {@code signal.id}
      * @return {@code true} if the write is allowed
      */
-    public boolean isWriteAllowed(String stableSignalId) {
-        return writesAllow.contains("*") || writesAllow.contains(stableSignalId);
+    public boolean isWriteAllowed(CanonicalSignalId signalId) {
+        return signalId != null && (writesAllow.contains("*") || writesAllow.contains(signalId.toString()));
     }
 
     /** Whether any {@code writes.allow[]} entry is configured (writes are entirely off when empty). */

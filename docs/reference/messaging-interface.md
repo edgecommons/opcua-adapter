@@ -127,7 +127,17 @@ Naming an unconnected/unknown instance (or addressing the adapter when none is c
 | `repoll` | `instance` | request/reply, **confirmed** | immediately read every subscribed signal and republish on `data` |
 
 The library also provides the built-in verbs `ping`, `reload-config`, and `get-configuration` on the
-same inbox (out of the box; not southbound-specific).
+same inbox (out of the box; not southbound-specific). `reload-config` re-reads the configuration
+document; adapter settings (endpoints, security, subscriptions, timing, `writes.allow[]`) are applied
+at startup, so restart the component for a configuration change to take effect.
+
+**Request bounds.** `sb/read` accepts at most `component.global.limits.maxReadTargets` signals (1000
+by default) and `sb/write` at most `maxWriteTargets` entries; a larger request is refused with
+`BAD_ARGS` rather than silently truncated, so a caller never mistakes a partial result for a complete
+one. An `include`/`exclude` matcher that is over-long or too expensive to evaluate is likewise refused
+with `BAD_ARGS`. Every OPC UA service call is bounded by `limits.commandTimeoutMs` (15 s by default)
+and answers `DEVICE_UNAVAILABLE` on expiry, and large batches are split to the server's published
+`MaxNodesPerRead`/`MaxNodesPerWrite` operation limits.
 
 ## Sample object
 
@@ -296,15 +306,16 @@ Result lists the currently resolved/subscribed signals, each signal's `idType`, 
 namespace index and its URI, the matcher that selected it, and whether it is `writable`:
 
 ```jsonc
-{ "ok": true, "result": { "id": "kep1", "signals": [ { "signalId": "…Sine1", "idType": "String", "namespace": 2,
-    "namespaceUri": "urn:kepware:KEPServerEX", "match": "^…Sine.*", "writable": false } ] } }
+{ "ok": true, "result": { "id": "kep1", "signals": [
+    { "signalId": "nsu=urn:kepware:KEPServerEX;s=…Sine1", "idType": "String", "namespace": 2,
+      "namespaceUri": "urn:kepware:KEPServerEX", "match": "^…Sine.*", "writable": false } ] } }
 ```
 
 | Field | Notes |
 |-------|-------|
-| `signalId` | bare node identifier |
+| `signalId` | the stable `signal.id`, in the canonical `nsu=<namespaceUri>;<type>=<identifier>` form (`ns=0;…` in namespace 0) — the same value published in the telemetry body and the key `writes.allow[]` matches |
 | `idType` | `Numeric` \| `String` \| `Guid` |
-| `namespace` | resolved namespace index |
+| `namespace` | the namespace index this session resolved the signal at — a per-session handle, useful for diagnostics but not an identity |
 | `namespaceUri` | that namespace's URI, when resolvable |
 | `match` | the matcher that selected the signal |
 | `writable` | `true` iff the signal's stable `signal.id` is in the instance's `writes.allow[]` (i.e. `sb/write` may write it) |
@@ -381,6 +392,11 @@ NodeId such as `"ns=2;s=Channel1.Device1"`, or a normal command ref object with 
 
 Re-browses the server's address space and refreshes the node cache used by `sb/browse`/`sb/read` in
 place (live subscriptions are unaffected). Result `{ "id": "kep1", "total": <n>, "rescanned": true }`.
+
+The cache is replaced only when the traversal completed. If the browse failed part-way, hit its node
+or depth budget, or the session is down, the existing cache is **kept** and the reply reports
+`{ "rescanned": false, "error": "<reason>", "total": <unchanged count> }` — a partial traversal would
+otherwise erase a healthy address space while reporting success.
 
 ### `sb/pause` (confirmed)
 

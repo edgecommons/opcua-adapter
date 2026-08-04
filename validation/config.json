@@ -47,7 +47,7 @@
         },
         "writes": {
           "allow": [
-            "ns=2;s=Setpoint"
+            "nsu=urn:edgecommons:sim;s=Setpoint"
           ]
         },
         "subscriptions": [

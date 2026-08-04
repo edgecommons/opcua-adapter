@@ -1,5 +1,6 @@
 package com.mbreissi.edgecommons.opcua.opc;
 
+import com.mbreissi.edgecommons.opcua.opc.config.AdapterLimits;
 import com.mbreissi.edgecommons.opcua.opc.config.SignalSpec;
 import org.eclipse.milo.opcua.stack.core.NamespaceTable;
 import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UShort;
@@ -44,8 +45,10 @@ public final class SignalMatching {
             return false;
         }
         Pattern rx = spec.pattern();
-        return rx.matcher(idStr).matches()
-                || (matchNames && (rx.matcher(browseName).matches() || rx.matcher(displayName).matches()));
+        int budget = AdapterLimits.DEFAULT_REGEX_STEP_BUDGET;
+        return SafeRegex.matches(rx, idStr, budget)
+                || (matchNames && (SafeRegex.matches(rx, browseName, budget)
+                        || SafeRegex.matches(rx, displayName, budget)));
     }
 
     /** The first spec (in list order) that matches the node, or {@code null} if none do. */
