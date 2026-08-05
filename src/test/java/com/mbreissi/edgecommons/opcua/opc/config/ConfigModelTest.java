@@ -3,6 +3,7 @@ package com.mbreissi.edgecommons.opcua.opc.config;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mbreissi.edgecommons.config.ConfigManager;
+import com.mbreissi.edgecommons.opcua.opc.CanonicalSignalId;
 import com.mbreissi.edgecommons.opcua.opc.ResolvedSignal;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.DeadbandType;
@@ -82,7 +83,6 @@ class ConfigModelTest {
         assertEquals(50.0, s.getSamplingRateMs());
         assertEquals(10, s.getQueueSize());
         assertNull(s.getNamespaceUri());
-        assertNull(s.getTopic());
         assertTrue(s.pattern().matcher("Sim.Sine1").matches());
         // cached compile returns the same instance
         assertEquals(s.pattern(), s.pattern());
@@ -104,7 +104,7 @@ class ConfigModelTest {
                 + "\"connection\":{\"endpoint\":\"opc.tcp://h:4840/\",\"securityPolicy\":\"None\"},"
                 + "\"defaults\":{\"publishIntervalMs\":500,\"samplingRateMs\":250,\"queueSize\":50},"
                 + "\"publish\":{\"batchMs\":800},"
-                + "\"writes\":{\"allow\":[\"ns=2;s=A\"]},"
+                + "\"writes\":{\"allow\":[\"nsu=urn:test:ns;s=A\"]},"
                 + "\"subscriptions\":[{"
                 + "  \"id\":\"sine\","
                 + "  \"include\":[{\"namespace\":2,\"match\":\"^Sim\\\\.Sine.*\",\"deadband\":{\"type\":\"Absolute\",\"value\":0.5}}],"
@@ -118,7 +118,7 @@ class ConfigModelTest {
         assertEquals(250.0, cfg.getDefaultSamplingMs());
         assertEquals(50, cfg.getDefaultQueueSize());
         assertEquals(800L, cfg.getBatchMs());
-        assertTrue(cfg.isWriteAllowed("ns=2;s=A"));
+        assertTrue(cfg.isWriteAllowed(CanonicalSignalId.parse("nsu=urn:test:ns;s=A")));
 
         List<SubscriptionSpec> subs = cfg.getSubscriptionSpecs();
         assertEquals(1, subs.size());
@@ -149,8 +149,11 @@ class ConfigModelTest {
         SignalSpec spec = SignalSpec.fromJson(
                 JsonParser.parseString("{\"namespace\":2,\"match\":\".*\"}").getAsJsonObject());
         NodeId nodeId = new NodeId(2, "Channel1.Device1.Tag");
-        ResolvedSignal rs = new ResolvedSignal(nodeId, spec);
+        CanonicalSignalId canonicalId = new CanonicalSignalId("urn:test:ns", 's', "Channel1.Device1.Tag");
+        ResolvedSignal rs = new ResolvedSignal(nodeId, spec, canonicalId);
         assertEquals(nodeId, rs.nodeId());
         assertEquals(spec, rs.spec());
+        assertEquals(canonicalId, rs.canonicalId());
+        assertEquals("nsu=urn:test:ns;s=Channel1.Device1.Tag", rs.signalId());
     }
 }

@@ -3,9 +3,11 @@ package com.mbreissi.edgecommons.opcua.opc.config;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mbreissi.edgecommons.config.ConfigManager;
+import com.mbreissi.edgecommons.opcua.opc.CanonicalSignalId;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -34,27 +36,40 @@ class ServerConfigurationTest {
     void writesAllow_absent_rejectsEveryWrite() {
         ServerConfiguration cfg = serverConfig("{\"id\":\"kep1\"}");
         assertFalse(cfg.isWriteConfigured());
-        assertFalse(cfg.isWriteAllowed("ns=2;s=Channel1.Device1.Setpoint"));
+        assertFalse(cfg.isWriteAllowed(id("Kepware Server", 's', "Channel1.Device1.Setpoint")));
+    }
+
+    /** An index-bearing allow-list entry is refused outright: an index names nothing stable. */
+    @Test
+    void writesAllow_namespaceIndexEntry_isRejectedAtStartup() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> serverConfig("{\"id\":\"kep1\",\"writes\":{\"allow\":[\"ns=2;s=Setpoint\"]}}"));
+        assertTrue(e.getMessage().contains("not stable across sessions"));
+    }
+
+    private static CanonicalSignalId id(String uri, char type, String identifier) {
+        return new CanonicalSignalId(uri, type, identifier);
     }
 
     @Test
     void writesAllow_listed_allowsOnlyExactStableIds() {
         ServerConfiguration cfg = serverConfig(
-                "{\"id\":\"kep1\",\"writes\":{\"allow\":[\"ns=2;s=Channel1.Device1.Setpoint\",\"ns=3;i=1001\"]}}");
+                "{\"id\":\"kep1\",\"writes\":{\"allow\":[\"nsu=Kepware Server;s=Channel1.Device1.Setpoint\","
+                        + "\"nsu=urn:other;i=1001\"]}}");
         assertTrue(cfg.isWriteConfigured());
-        assertTrue(cfg.isWriteAllowed("ns=2;s=Channel1.Device1.Setpoint"));
-        assertTrue(cfg.isWriteAllowed("ns=3;i=1001"));
+        assertTrue(cfg.isWriteAllowed(id("Kepware Server", 's', "Channel1.Device1.Setpoint")));
+        assertTrue(cfg.isWriteAllowed(id("urn:other", 'i', "1001")));
         // A near-miss (different id / different namespace) is rejected.
-        assertFalse(cfg.isWriteAllowed("ns=2;s=Channel1.Device1.Other"));
-        assertFalse(cfg.isWriteAllowed("ns=4;i=1001"));
+        assertFalse(cfg.isWriteAllowed(id("Kepware Server", 's', "Channel1.Device1.Other")));
+        assertFalse(cfg.isWriteAllowed(id("urn:unrelated", 'i', "1001")));
     }
 
     @Test
     void writesAllow_wildcard_allowsEverything() {
         ServerConfiguration cfg = serverConfig("{\"id\":\"kep1\",\"writes\":{\"allow\":[\"*\"]}}");
         assertTrue(cfg.isWriteConfigured());
-        assertTrue(cfg.isWriteAllowed("ns=2;s=anything"));
-        assertTrue(cfg.isWriteAllowed("ns=9;i=42"));
+        assertTrue(cfg.isWriteAllowed(id("urn:any", 's', "anything")));
+        assertTrue(cfg.isWriteAllowed(id("urn:other", 'i', "42")));
     }
 
     @Test

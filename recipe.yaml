@@ -42,32 +42,37 @@ ComponentConfiguration:
         token: opcua-adapter
         global: {}
         instances: []
+    # Least privilege: the adapter speaks the UNS (`ecv1/...`) and reads its own thing shadow, so the
+    # grants say exactly that. A wildcard over every IPC topic, every IoT Core topic, and every shadow
+    # would give a compromised adapter device-wide messaging and shadow reach, which is far beyond what
+    # a southbound protocol bridge needs.
     accessControl:
       aws.greengrass.ipc.pubsub:
         "com.mbreissi.edgecommons.OpcUaAdapter:ipc:1":
-          policyDescription: Allows access to publish/subscribe to all topics on IPC
+          policyDescription: Publish/subscribe on the EdgeCommons UNS root only.
           operations:
             - "aws.greengrass#PublishToTopic"
             - "aws.greengrass#SubscribeToTopic"
           resources:
-            - "*"
+            - "ecv1/*"
       aws.greengrass.ipc.mqttproxy:
         "com.mbreissi.edgecommons.OpcUaAdapter:iotcore:1":
-          policyDescription: Allows access to publish/subscribe to all topics on IoT Core.
+          policyDescription: Publish/subscribe on the EdgeCommons UNS root only.
           operations:
             - "aws.greengrass#PublishToIoTCore"
             - "aws.greengrass#SubscribeToIoTCore"
           resources:
-            - "*"
+            - "ecv1/*"
       aws.greengrass.ShadowManager:
         "com.mbreissi.edgecommons.OpcUaAdapter:shadow:1":
-          policyDescription: Allows access to shadows.
+          # Read/update this device's own shadow (the optional SHADOW config source). Delete is not
+          # granted: nothing in the adapter deletes a shadow, and the capability is destructive.
+          policyDescription: Read and update this thing's own shadow.
           operations:
             - 'aws.greengrass#GetThingShadow'
             - 'aws.greengrass#UpdateThingShadow'
-            - 'aws.greengrass#DeleteThingShadow'
           resources:
-            - "*"
+            - "{iot:thingName}"
 Manifests:
   - Platform:
       os: all
@@ -77,6 +82,22 @@ Manifests:
       # Runs as the default component user (ggc_user) — no elevated privilege needed (GG IPC,
       # TES-backed AWS, and the work dir are all accessible unprivileged). Add RequiresPrivilege
       # only if your component genuinely requires root.
+      #
+      # The artifact targets Java 25 and the device supplies the runtime. Checked at install time so a
+      # host with an older JDK fails the deployment with a readable message, rather than at first run
+      # with an UnsupportedClassVersionError.
+      Install:
+        Script: |
+          set -e
+          if ! command -v java >/dev/null 2>&1; then
+            echo "opcua-adapter requires a Java runtime (>= 25) on PATH; none found" >&2
+            exit 1
+          fi
+          major=$(java -version 2>&1 | head -1 | cut -d'"' -f2 | cut -d. -f1)
+          if [ -z "$major" ] || [ "$major" -lt 25 ]; then
+            echo "opcua-adapter requires Java >= 25; found: $(java -version 2>&1 | head -1)" >&2
+            exit 1
+          fi
       Run:
         Setenv:
           CONFIG: "{configuration:/ComponentConfig}"

@@ -1,12 +1,13 @@
 package com.mbreissi.edgecommons.opcua.opc.config;
 
 import com.google.gson.JsonObject;
+import com.mbreissi.edgecommons.opcua.opc.SafeRegex;
 
 import java.util.regex.Pattern;
 
 /**
  * One signal matcher within a subscription's include/exclude list (southbound config convention):
- * {@code { "namespaceUri": "<uri>", "namespace": <int>, "match": "<regex>", "topic": "<optional>",
+ * {@code { "namespaceUri": "<uri>", "namespace": <int>, "match": "<regex>",
  * "samplingRateMs": <num>, "queueSize": <int>, "deadband": {...} }}.
  *
  * <p>The namespace is identified by {@code namespaceUri} (preferred — resolved to the server's current
@@ -18,18 +19,16 @@ public class SignalSpec {
     private final int namespace;
     private final String namespaceUri;
     private final String match;
-    private final String topic;
     private final double samplingRateMs;
     private final int queueSize;
     private final DeadbandSpec deadband;
     private Pattern compiled;
 
-    private SignalSpec(int namespace, String namespaceUri, String match, String topic,
+    private SignalSpec(int namespace, String namespaceUri, String match,
                    double samplingRateMs, int queueSize, DeadbandSpec deadband) {
         this.namespace = namespace;
         this.namespaceUri = namespaceUri;
         this.match = match;
-        this.topic = topic;
         this.samplingRateMs = samplingRateMs;
         this.queueSize = queueSize;
         this.deadband = deadband;
@@ -58,15 +57,10 @@ public class SignalSpec {
     public Pattern pattern() {
         Pattern p = compiled;
         if (p == null) {
-            p = Pattern.compile(match);
+            p = SafeRegex.compile(match, AdapterLimits.DEFAULT_MAX_REGEX_LENGTH);
             compiled = p;
         }
         return p;
-    }
-
-    /** Optional per-signal publish-topic override; {@code null} to use the instance's publish topic. */
-    public String getTopic() {
-        return topic;
     }
 
     public double getSamplingRateMs() {
@@ -89,10 +83,9 @@ public class SignalSpec {
         int ns = o.has("namespace") ? o.get("namespace").getAsInt() : 0;
         String nsUri = o.has("namespaceUri") ? o.get("namespaceUri").getAsString() : null;
         String match = o.has("match") ? o.get("match").getAsString() : ".*";
-        String topic = o.has("topic") ? o.get("topic").getAsString() : null;
         double sampling = o.has("samplingRateMs") ? o.get("samplingRateMs").getAsDouble() : defaultSamplingMs;
         int queue = o.has("queueSize") ? o.get("queueSize").getAsInt() : defaultQueueSize;
         DeadbandSpec deadband = DeadbandSpec.fromJson(o.has("deadband") ? o.getAsJsonObject("deadband") : null);
-        return new SignalSpec(ns, nsUri, match, topic, sampling, queue, deadband);
+        return new SignalSpec(ns, nsUri, match, sampling, queue, deadband);
     }
 }

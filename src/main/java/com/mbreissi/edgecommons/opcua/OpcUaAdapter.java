@@ -106,7 +106,15 @@ public class OpcUaAdapter {
                         devices.add(device);
                     }
                     commandRegistry.addDevice(device);   // now routable by the sb/* verbs
-                    edgeCommons.setReady(true);            // ready once at least one device is connected + subscribed
+                    // Ready only once a device is actually SERVING — connected AND with monitored items
+                    // live. A device whose subscriptions all failed is connected but produces nothing;
+                    // reporting it ready would tell an orchestrator to send traffic to a silent adapter.
+                    if (device.isServing()) {
+                        edgeCommons.setReady(true);
+                    } else {
+                        LOGGER.warn("[{}] connected but not serving any monitored items; not marking ready",
+                                instanceId);
+                    }
                 } catch (OpcUaConnection.UnretryableConnectionException e) {
                     LOGGER.error("[{}] {}", instanceId, e.getMessage());
                 } catch (Exception e) {
@@ -117,6 +125,14 @@ public class OpcUaAdapter {
             worker.start();
         }
 
+        // Quiesce device-owned resources before the JVM exits. The library's own shutdown hook closes
+        // messaging/metrics; the Milo sessions, monitored items, and device ticks are ours, and left
+        // running they publish into a bus that is being torn down and leave subscriptions live on the
+        // server. NOTE: hook ordering between this and the library's hook is not deterministic — the
+        // race is narrowed, not eliminated. A core `onShutdown` seam that runs component tasks before
+        // messaging teardown is the complete fix (see DESIGN.md D-OPCUA-16).
+        Runtime.getRuntime().addShutdownHook(new Thread(this::closeDevices, "opcua-adapter-shutdown"));
+
         // Block until the library's signal hook fires graceful shutdown and the JVM exits.
         try {
             shutdownLatch.await();
@@ -124,6 +140,21 @@ public class OpcUaAdapter {
             Thread.currentThread().interrupt();
         }
         LOGGER.info("OPC UA adapter stopped");
+    }
+
+    /** Close every device: stop ticking, delete subscriptions, final flush, drop the session. */
+    void closeDevices() {
+        List<OpcUaDevice> snapshot;
+        synchronized (devices) {
+            snapshot = new ArrayList<>(devices);
+        }
+        for (OpcUaDevice device : snapshot) {
+            try {
+                device.close();
+            } catch (RuntimeException e) {
+                LOGGER.warn("[{}] closing device failed: {}", device.getId(), e.toString());
+            }
+        }
     }
 
     /**

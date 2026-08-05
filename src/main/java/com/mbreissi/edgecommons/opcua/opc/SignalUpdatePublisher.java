@@ -26,21 +26,25 @@ import java.util.concurrent.LinkedBlockingQueue;
  * samples), applies the quality/timestamp defaulting, mints the topic, and stamps the envelope
  * identity; this class only maps OPC UA reads onto the facade's {@code SignalUpdate} builder. When
  * {@code batchMs > 0}, value changes are buffered per node and flushed together by {@link #flush()}
- * (driven by the device's timer); otherwise each change publishes immediately.
+ * (driven by the device's scheduler); otherwise each change publishes immediately.
  *
  * <p><b>Addressing (UNS §2.0).</b> Each update is published to
  * {@code ecv1/{device}/{component}/{instance}/data/{signalPath}}, minted by the facade's bound
- * {@code Uns} builder — never a hand-assembled string. {@code signalPath} is the signal's OPC UA bare
- * identifier sanitized to a single UNS channel token ({@link ConfigManager#sanitize}: {@code / \ + #}
- * and control chars → {@code _}, and {@code ..} collapsed) <b>before</b> it reaches the facade, so it
- * stays exactly one channel token even though the facade would otherwise split on {@code /} (the
- * sanitize pass removes any embedded slashes first, and is idempotent under the facade's own
- * second pass) — depth-safe by construction. The <b>stable</b> {@code signal.id} in the body (the
- * {@code ns=…;…=…} parseable form) remains what consumers key on; the sanitized path is only the
- * routing address. The top-level {@code identity} element is stamped automatically by the facade —
- * the site hierarchy rides there, not in the topic. OPC UA's own {@code StatusCode}-derived quality
- * ({@link ValueCodec#normalizeQuality}) is passed explicitly on every sample so the facade never
- * falls back to its {@code GOOD} default.
+ * {@code Uns} builder — never a hand-assembled string. {@code signalPath} is the signal's
+ * {@link CanonicalSignalId#channelToken()} — a namespace discriminator, the identifier type, and the
+ * identifier — sanitized to a single UNS channel token ({@link ConfigManager#sanitize}) <b>before</b>
+ * it reaches the facade, so it stays exactly one channel token even though the facade would otherwise
+ * split on {@code /}. Discriminating by namespace and id type is what keeps two distinct signals off
+ * one topic. The <b>stable</b> {@code signal.id} in the body (the canonical {@code nsu=…} form) remains
+ * what consumers key on; the sanitized path is only the routing address. The top-level {@code identity}
+ * element is stamped automatically by the facade — the site hierarchy rides there, not in the topic.
+ * OPC UA's own {@code StatusCode}-derived quality ({@link ValueCodec#normalizeQuality}) is passed
+ * explicitly on every sample so the facade never falls back to its {@code GOOD} default.
+ *
+ * <p><b>Backpressure.</b> Each signal's buffer is bounded. A consumer that stops draining — a wedged
+ * broker, a slow flush — cannot grow the buffer without limit; the oldest samples are discarded and
+ * counted on the operational {@code OpcUaSubscription.DroppedSample} measures, so the loss is visible
+ * rather than silent. A publish failure re-buffers the batch instead of discarding it.
  */
 public class SignalUpdatePublisher {
 
@@ -50,14 +54,18 @@ public class SignalUpdatePublisher {
     private final ServerConfiguration serverConfig;
     private final NamespaceTable namespaceTable;
     private final HealthState health;
+    private final ClientMetrics counters;
+    private final int maxBufferedSamples;
     private final Map<UaVariableNode, Buffer> pending = new ConcurrentHashMap<>();
 
     public SignalUpdatePublisher(EdgeCommonsInstance instance, ServerConfiguration serverConfig,
-                                 NamespaceTable namespaceTable, HealthState health) {
+                                 NamespaceTable namespaceTable, HealthState health, ClientMetrics counters) {
         this.instance = instance;
         this.serverConfig = serverConfig;
         this.namespaceTable = namespaceTable;
         this.health = health;
+        this.counters = counters;
+        this.maxBufferedSamples = serverConfig.getLimits().getMaxBufferedSamples();
     }
 
     /**
@@ -73,13 +81,40 @@ public class SignalUpdatePublisher {
         }
         Received received = new Received(value, Instant.now());
         if (serverConfig.getBatchMs() > 0) {
-            pending.computeIfAbsent(node, n -> new Buffer(spec)).queue.add(received);
+            Buffer buffer = pending.computeIfAbsent(node, n -> new Buffer(spec, capacityFor(spec)));
+            enqueue(buffer, received);
         } else {
             publish(node, List.of(received));
         }
     }
 
-    /** Flush all buffered values (one message per node). Called on the batch timer. A no-op while paused. */
+    /**
+     * The per-signal buffer capacity: generous relative to the monitored-item queue the server is
+     * asked to keep, but finite.
+     */
+    private int capacityFor(SignalSpec spec) {
+        return Math.max(spec.getQueueSize() * 4, maxBufferedSamples);
+    }
+
+    /** Add a sample, discarding the oldest (and counting it) when the buffer is at capacity. */
+    private void enqueue(Buffer buffer, Received received) {
+        long dropped = 0;
+        while (!buffer.queue.offer(received)) {
+            if (buffer.queue.poll() == null) {
+                break;
+            }
+            dropped++;
+        }
+        if (dropped > 0 && counters != null) {
+            counters.recordDroppedSamples(dropped);
+            LOGGER.warn("[{}] publish buffer full; dropped {} oldest sample(s)", serverConfig.getId(), dropped);
+        }
+    }
+
+    /**
+     * Flush all buffered values (one message per node). Called on the device tick. A no-op while
+     * paused. Each node is flushed independently so one signal's failure cannot abort the sweep.
+     */
     public void flush() {
         if (health != null && health.isPaused()) {
             return;
@@ -87,10 +122,31 @@ public class SignalUpdatePublisher {
         pending.forEach((node, buffer) -> {
             List<Received> values = new ArrayList<>();
             buffer.queue.drainTo(values);
-            if (!values.isEmpty()) {
+            if (values.isEmpty()) {
+                return;
+            }
+            try {
                 publish(node, values);
+            } catch (RuntimeException e) {
+                // A transport-level failure: put the batch back rather than losing it, up to the bound.
+                LOGGER.warn("[{}] publish failed, re-buffering {} sample(s): {}",
+                        serverConfig.getId(), values.size(), e.toString());
+                requeue(buffer, values);
             }
         });
+    }
+
+    /** Return an unpublished batch to the front of its buffer, honouring the capacity bound. */
+    private void requeue(Buffer buffer, List<Received> values) {
+        long dropped = 0;
+        for (Received received : values) {
+            if (!buffer.queue.offer(received)) {
+                dropped++;
+            }
+        }
+        if (dropped > 0 && counters != null) {
+            counters.recordDroppedSamples(dropped);
+        }
     }
 
     private void publish(UaVariableNode node, List<Received> values) {
@@ -102,13 +158,20 @@ public class SignalUpdatePublisher {
         String displayName = node.getDisplayName() != null && node.getDisplayName().getText() != null
                 ? node.getDisplayName().getText() : "";
 
-        String signalId = node.getNodeId().toParseableString();
+        CanonicalSignalId canonicalId;
+        try {
+            canonicalId = CanonicalSignalId.of(node.getNodeId(), namespaceTable);
+        } catch (RuntimeException e) {
+            LOGGER.warn("[{}] dropping update for {}: {}", serverConfig.getId(), node.getNodeId(), e.getMessage());
+            return;
+        }
+        String signalId = canonicalId.toString();
 
-        // Sanitize the OPC UA bare identifier into a single UNS channel token: it can legally contain
-        // '/', long/GUID forms, etc. that the UNS token rule + IoT-Core depth guard would otherwise
-        // reject at build time. Collapsing to one token here (before the facade's own sanitize pass,
-        // which is idempotent) keeps the topic depth-safe by construction.
-        String signalPath = ConfigManager.sanitize(node.getNodeId().getIdentifier().toString());
+        // Sanitize the canonical channel token into a single UNS channel token: the identifier can
+        // legally contain '/', long/GUID forms, etc. that the UNS token rule + IoT-Core depth guard
+        // would otherwise reject at build time. Collapsing to one token here (before the facade's own
+        // sanitize pass, which is idempotent) keeps the topic depth-safe by construction.
+        String signalPath = ConfigManager.sanitize(canonicalId.channelToken());
 
         List<SignalUpdate.Sample> samples = new ArrayList<>(values.size());
         for (Received received : values) {
@@ -131,8 +194,9 @@ public class SignalUpdatePublisher {
                 health.onSignalUpdate(signalId, System.nanoTime());
             }
         } catch (UnsValidationException e) {
-            // e.g. an identifier so long the total topic exceeds the IoT-Core 256-byte limit. Drop the
-            // message rather than crash the flush loop; the stable signal.id still names it in a log.
+            // e.g. an identifier so long the total topic exceeds the IoT-Core 256-byte limit. The
+            // message can never become valid by retrying, so drop it rather than re-buffer forever;
+            // the stable signal.id still names it in a log.
             LOGGER.warn("[{}] dropping update for '{}': cannot mint a valid UNS data topic ({})",
                     serverConfig.getId(), signalId, e.getMessage());
         }
@@ -144,10 +208,11 @@ public class SignalUpdatePublisher {
 
     private static final class Buffer {
         final SignalSpec spec;
-        final LinkedBlockingQueue<Received> queue = new LinkedBlockingQueue<>();
+        final LinkedBlockingQueue<Received> queue;
 
-        Buffer(SignalSpec spec) {
+        Buffer(SignalSpec spec, int capacity) {
             this.spec = spec;
+            this.queue = new LinkedBlockingQueue<>(Math.max(1, capacity));
         }
     }
 }

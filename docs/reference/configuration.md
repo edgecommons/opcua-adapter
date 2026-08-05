@@ -16,7 +16,7 @@ The adapter reads one JSON document from the `-c/--config` source, which default
 
 Adapter settings live under `component`; the sibling sections (`hierarchy`, `identity`, `tags`,
 `messaging`, `credentials`, `logging`, `heartbeat`, `metricEmission`) are standard edgecommons sections.
-Configuration hot-reloads where the source supports it.
+Adapter settings are read once at startup. Changing any value under `component.global` or `component.instances[]` — endpoints, security, subscriptions, timing, or `writes.allow[]` — takes effect on the next restart of the component. The library re-reads the configuration document when the source supports it, but the adapter applies its own settings at startup only, so a configuration change is not live until the component restarts.
 
 ## Top-level sections
 
@@ -77,7 +77,7 @@ component-wide.
 | Key | Type | Default | Definition |
 |-----|------|---------|-----------|
 | `endpoint` | string | `""` | OPC UA endpoint URL, e.g. `opc.tcp://host:4840/`. |
-| `securityPolicy` | string | `"None"` | Milo `SecurityPolicy` name (`None`, `Basic256Sha256`, …). An unrecognized value falls back to `None` with a warning. |
+| `securityPolicy` | string | `"None"` | Milo `SecurityPolicy` name: `None`, `Basic128Rsa15`, `Basic256`, `Basic256Sha256`, `Aes128_Sha256_RsaOaep`, `Aes256_Sha256_RsaPss`. An unrecognized value fails the instance at startup — it is never treated as `None`, so a typo cannot downgrade an intended encrypted session to plaintext. A policy other than `None` requires `messageMode` to be `Sign` or `SignAndEncrypt`. |
 | `messageMode` | string | `"None"` | `MessageSecurityMode`: `None`, `Sign`, `SignAndEncrypt`. Under a secure policy, `None` is auto-upgraded to `SignAndEncrypt`. |
 | `applicationUri` | string | derived from cert SAN URI | Secure only. Must equal the client certificate's SubjectAltName URI. |
 | `user` | object | — | Optional UserName identity token (any policy). Inline or vault-backed — see below. |
@@ -133,7 +133,8 @@ One of three sources (`source`):
 
 > **Addressing is UNS-minted.** There is no `publish.topic` — signal updates ride the UNS `data` class
 > (`ecv1/{device}/{component}/{instance}/data/{signalPath}`), where `{signalPath}` is the node's bare
-> identifier sanitized to one channel token. Per-signal `topic` overrides are not supported.
+> canonical channel token — a namespace discriminator, the identifier type, and the identifier —
+> sanitized to one channel token. Per-signal `topic` overrides are not supported.
 
 ### `instances[].writes` (allow-list)
 
@@ -141,7 +142,7 @@ One of three sources (`source`):
 |-----|------|---------|-----------|
 | `allow` | string[] | `[]` | Stable `signal.id`s the `sb/write` verb may write (or the wildcard `"*"` = allow all). **Absent/empty ⇒ every write is rejected** (secure-by-default). |
 
-Matching is **exact** against the target's stable `signal.id` (the `ns=<ns>;<type>=<id>` parseable
+Matching is **exact** against the target's stable `signal.id` (the `nsu=<namespaceUri>;<type>=<id>` canonical
 form, as published in `SouthboundSignalUpdate.signal.id`), e.g. `"ns=2;s=Channel1.Device1.Setpoint"`.
 A non-allow-listed write is confirmed `FAILED` and raises `evt/warning/write-rejected`.
 
@@ -170,7 +171,7 @@ A non-allow-listed write is confirmed `FAILED` and raises `evt/warning/write-rej
 | `deadband` | object | `{type:"None"}` | `type`: `None`/`Absolute`/`Percent`; `value`: number. |
 
 A node is subscribed when it matches **any** `include` matcher and **no** `exclude` matcher. (A
-per-matcher `topic` key is ignored — addressing is UNS-minted.)
+per-matcher `topic` key is not accepted — addressing is UNS-minted.)
 
 ## Template variables
 

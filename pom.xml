@@ -147,7 +147,9 @@
             <!-- Bootstrap: main() + EdgeCommonsBuilder wiring + per-instance worker fan-out. -->
             <exclude>**/opcua/OpcUaAdapter.class</exclude>
             <exclude>**/opcua/OpcUaAdapter$*.class</exclude>
-            <!-- Live Milo driver seam: the concrete OPC UA client, address-space browse, subscription
+            <!-- Live Milo driver seam: the concrete OPC UA client, the browse transport (pure
+                 delegation to OpcUaClient - the traversal logic it feeds lives in AddressSpaceBrowser,
+                 which IS in the gate and unit-tested through a scripted BrowseTransport), subscription
                  manager, the data()-publishing signal publisher, the per-instance device coordinator
                  (the live DeviceSession impl: reconnect/repoll/rescan touch the live session), and the
                  CommandService read/write/browse/signals handlers — every remaining method calls the live
@@ -162,8 +164,7 @@
             <exclude>**/opc/OpcUaConnection$*.class</exclude>
             <exclude>**/opc/OpcUaDevice.class</exclude>
             <exclude>**/opc/OpcUaDevice$*.class</exclude>
-            <exclude>**/opc/AddressSpaceBrowser.class</exclude>
-            <exclude>**/opc/AddressSpaceBrowser$*.class</exclude>
+            <exclude>**/opc/MiloBrowseTransport.class</exclude>
             <exclude>**/opc/SubscriptionManager.class</exclude>
             <exclude>**/opc/SubscriptionManager$*.class</exclude>
             <exclude>**/opc/SignalUpdatePublisher.class</exclude>

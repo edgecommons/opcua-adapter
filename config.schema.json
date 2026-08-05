@@ -31,6 +31,62 @@
         }
       }
     },
+    "browse": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Bounds on address-space traversal. A server with a very large or cyclic address space must not be able to make discovery unbounded.",
+      "properties": {
+        "maxNodes": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 50000,
+          "description": "Variable nodes collected in one browse before the traversal reports itself truncated. A truncated browse never replaces the cache on `sb/rescan`."
+        },
+        "maxDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 32,
+          "description": "Hierarchy levels descended in one browse."
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Bounds on command execution. Requests arrive over the bus, so every batch size and every blocking call is capped.",
+      "properties": {
+        "maxReadTargets": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1000,
+          "description": "Signals one `sb/read` may name (explicit plus include-matched, after de-duplication). A request over the cap is refused with `BAD_ARGS` rather than silently truncated, so a caller never mistakes a partial read for a complete one."
+        },
+        "maxWriteTargets": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1000,
+          "description": "Entries one `sb/write` batch may carry. Over the cap is refused with `BAD_ARGS`."
+        },
+        "commandTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 15000,
+          "description": "Deadline on a single blocking OPC UA service call. On expiry the command answers `DEVICE_UNAVAILABLE` instead of parking the command thread."
+        },
+        "chunkSize": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 100,
+          "description": "Fallback nodes-per-service-call when the server publishes no `MaxNodesPerRead`/`MaxNodesPerWrite` operation limit. When it does publish one, the smaller of the two applies."
+        },
+        "maxBufferedSamples": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 10000,
+          "description": "Samples buffered per signal between batch flushes. At capacity the oldest are discarded and counted on `OpcUaSubscription.DroppedSample*`, so backpressure loss is visible rather than silent."
+        }
+      }
+    },
     "healthThresholds": {
       "type": "object",
       "additionalProperties": false,
@@ -80,8 +136,9 @@
             },
             "securityPolicy": {
               "type": "string",
+              "enum": ["None", "Basic128Rsa15", "Basic256", "Basic256Sha256", "Aes128_Sha256_RsaOaep", "Aes256_Sha256_RsaPss"],
               "default": "None",
-              "description": "Milo SecurityPolicy enum name, e.g. `None` or `Basic256Sha256`. `None` is anonymous/unencrypted; anything else requests a secure channel."
+              "description": "Milo SecurityPolicy enum name. `None` is anonymous/unencrypted; anything else requests a secure channel and requires `messageMode` to be `Sign` or `SignAndEncrypt`. An unrecognized value fails the instance at startup — it is never treated as `None`, because a typo must not silently downgrade an intended encrypted session to plaintext."
             },
             "messageMode": {
               "type": "string",
@@ -125,9 +182,13 @@
           "properties": {
             "allow": {
               "type": "array",
-              "items": { "type": "string", "minLength": 1 },
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(\\*|nsu=.+;[isgb]=.+|ns=0;[isgb]=.+)$"
+              },
               "default": [],
-              "description": "Stable signal ids (`ns=<ns>;<type>=<id>` parseable form, as published) that `sb/write` may write, or the wildcard `\"*\"`. Anything not listed is refused, whatever a command asks for. An empty list — the default — means the adapter is read-only, the correct posture for anything touching a control system."
+              "description": "Stable signal ids that `sb/write` may write, in the canonical `nsu=<namespaceUri>;<i|s|g|b>=<identifier>` form (or `ns=0;…` in namespace 0), or the wildcard `\"*\"`. A namespace INDEX (`ns=2;…`) is rejected: an index is a per-session handle, so an index-keyed entry can refuse a legitimate write after the server renumbers, or authorize a different node that has taken over the old index. Anything not listed is refused, whatever a command asks for. An empty list — the default — means the adapter is read-only, the correct posture for anything touching a control system."
             }
           }
         },
@@ -183,10 +244,6 @@
           "type": "string",
           "default": ".*",
           "description": "Regex applied to the node identifier, browse name, or display name (identifier only, for `exclude`)."
-        },
-        "topic": {
-          "type": "string",
-          "description": "Optional legacy per-signal topic override (the data-plane topic is otherwise UNS-minted)."
         },
         "samplingRateMs": {
           "type": "number",

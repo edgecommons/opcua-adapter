@@ -17,11 +17,12 @@ import org.eclipse.milo.opcua.stack.core.types.enumerated.DeadbandType;
 import org.eclipse.milo.opcua.stack.core.types.structured.DataChangeFilter;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.uint;
@@ -34,6 +35,12 @@ import static org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.Unsigned.
  * <p>A signal spec selects its namespace by URI (resolved to the server's current index from the live
  * namespace table) or by a literal index. Resolution happens here, each time subscriptions are built,
  * so a server that renumbers between connections is picked up automatically.
+ *
+ * <p><b>The inventory records fact, not intent.</b> A signal enters {@link #getResolvedSignals()} only
+ * after the server has confirmed its monitored item was created — so {@code signalsSubscribed} counts
+ * items the session actually serves, and a device cannot report itself subscribed to signals that
+ * failed. Entries are keyed by {@link CanonicalSignalId}, so two namespaces exposing the same bare
+ * identifier no longer overwrite one another.
  */
 public class SubscriptionManager {
 
@@ -45,7 +52,10 @@ public class SubscriptionManager {
     private final SignalUpdatePublisher publisher;
     private final ClientMetrics counters;
 
-    private final Map<OpcUaSubscription, SubscriptionSpec> subscriptions = new HashMap<>();
+    /** Live subscriptions. Concurrent: Milo invokes the transfer-failed callback on its own thread. */
+    private final Map<OpcUaSubscription, SubscriptionSpec> subscriptions = new ConcurrentHashMap<>();
+    /** The inventory keys each subscription committed, so a re-establish can retract exactly its own. */
+    private final Map<OpcUaSubscription, Set<String>> committed = new ConcurrentHashMap<>();
     private final Map<String, ResolvedSignal> resolvedSignals = new ConcurrentHashMap<>();
 
     public SubscriptionManager(OpcUaClient client, ServerConfiguration config,
@@ -58,21 +68,58 @@ public class SubscriptionManager {
         this.counters = counters;
     }
 
+    /** The confirmed inventory, keyed by canonical signal id. */
     public Map<String, ResolvedSignal> getResolvedSignals() {
         return resolvedSignals;
     }
 
-    public void createAll() {
+    /**
+     * What a subscription build actually achieved.
+     *
+     * @param itemsRequested monitored items the configuration asked for
+     * @param itemsLive      monitored items the server confirmed
+     * @param subscriptionsFailed subscription specs that could not be created at all
+     */
+    public record SubscriptionOutcome(int itemsRequested, int itemsLive, int subscriptionsFailed) {
+
+        /** Whether the device is serving what it was configured to serve. */
+        public boolean healthy() {
+            return subscriptionsFailed == 0 && itemsLive == itemsRequested;
+        }
+
+        /** Whether the device is serving anything at all (a zero-signal config is vacuously serving). */
+        public boolean serving() {
+            return itemsLive > 0 || itemsRequested == 0;
+        }
+    }
+
+    /** Build every configured subscription, reporting what actually came up. */
+    public SubscriptionOutcome createAll() {
+        int requested = 0;
+        int live = 0;
+        int failed = 0;
         for (SubscriptionSpec spec : config.getSubscriptionSpecs()) {
-            OpcUaSubscription subscription = create(spec);
-            if (subscription != null) {
-                subscriptions.put(subscription, spec);
+            Created created = create(spec);
+            requested += created.requested();
+            live += created.live();
+            if (created.subscription() == null) {
+                failed++;
+            } else {
+                subscriptions.put(created.subscription(), spec);
+                committed.put(created.subscription(), created.keys());
             }
         }
         updateSubscriptionShape();
+        return new SubscriptionOutcome(requested, live, failed);
     }
 
-    private OpcUaSubscription create(SubscriptionSpec spec) {
+    /**
+     * Create one subscription. Monitored items are staged locally and committed to the inventory only
+     * once the server has confirmed them, so a failure part-way through leaves no phantom entries.
+     */
+    private Created create(SubscriptionSpec spec) {
+        Map<UaVariableNode, SignalSpec> matching = filter(spec);
+        int requested = matching.size();
         try {
             OpcUaSubscription subscription = new OpcUaSubscription(client, spec.getPublishIntervalMs());
             subscription.setSubscriptionListener(new OpcUaSubscription.SubscriptionListener() {
@@ -84,9 +131,19 @@ public class SubscriptionManager {
                 }
             });
 
-            Map<UaVariableNode, SignalSpec> matching = filter(spec);
+            // Stage: build the items and remember what each one would contribute to the inventory.
+            Map<OpcUaMonitoredItem, ResolvedSignal> staged = new LinkedHashMap<>();
             List<OpcUaMonitoredItem> items = new ArrayList<>();
-            matching.forEach((node, signalSpec) -> {
+            for (Map.Entry<UaVariableNode, SignalSpec> entry : matching.entrySet()) {
+                UaVariableNode node = entry.getKey();
+                SignalSpec signalSpec = entry.getValue();
+                CanonicalSignalId canonicalId;
+                try {
+                    canonicalId = CanonicalSignalId.of(node.getNodeId(), client.getNamespaceTable());
+                } catch (RuntimeException e) {
+                    LOGGER.warn("[{}] skipping {}: {}", config.getId(), node.getNodeId(), e.getMessage());
+                    continue;
+                }
                 OpcUaMonitoredItem item = OpcUaMonitoredItem.newDataItem(node.getNodeId());
                 item.setSamplingInterval(signalSpec.getSamplingRateMs());
                 item.setQueueSize(uint(signalSpec.getQueueSize()));
@@ -102,29 +159,86 @@ public class SubscriptionManager {
                     publisher.offer(node, signalSpec, value);
                 });
                 items.add(item);
-                resolvedSignals.put(node.getNodeId().getIdentifier().toString(), new ResolvedSignal(node.getNodeId(), signalSpec));
-            });
+                staged.put(item, new ResolvedSignal(node.getNodeId(), signalSpec, canonicalId));
+            }
 
             subscription.addMonitoredItems(items);
             subscription.create();
             subscription.synchronizeMonitoredItems();
-            LOGGER.info("[{}] subscription '{}': {} monitored item(s)", config.getId(), spec.getId(), items.size());
-            return subscription;
+
+            // Commit: only the items the server actually accepted.
+            Set<String> keys = commit(staged);
+            LOGGER.info("[{}] subscription '{}': {}/{} monitored item(s) live",
+                    config.getId(), spec.getId(), keys.size(), requested);
+            return new Created(subscription, keys, requested, keys.size());
         } catch (Exception e) {
             LOGGER.error("[{}] failed to create subscription '{}': {}", config.getId(), spec.getId(), e.toString());
-            return null;
+            return new Created(null, Set.of(), requested, 0);
         }
     }
 
+    /** Commit the confirmed staged items into the inventory, returning the keys committed. */
+    private Set<String> commit(Map<OpcUaMonitoredItem, ResolvedSignal> staged) {
+        Set<String> keys = new LinkedHashSet<>();
+        staged.forEach((item, resolved) -> {
+            if (!isCreated(item)) {
+                LOGGER.warn("[{}] monitored item for {} was not created ({}); not counted as subscribed",
+                        config.getId(), resolved.signalId(),
+                        item.getCreateResult().map(StatusCode::toString).orElse("no result"));
+                return;
+            }
+            String key = resolved.signalId();
+            resolvedSignals.put(key, resolved);
+            keys.add(key);
+        });
+        return keys;
+    }
+
+    /** Whether the server confirmed this monitored item's creation. */
+    private static boolean isCreated(OpcUaMonitoredItem item) {
+        return item.getCreateResult().map(StatusCode::isGood).orElse(false);
+    }
+
+    /**
+     * Re-establish a subscription after a transfer failure. The old subscription's committed inventory
+     * is retracted first, so the gauge reflects the rebuild rather than accreting stale entries.
+     */
     public void reestablish(OpcUaSubscription subscription) {
         SubscriptionSpec spec = subscriptions.remove(subscription);
         if (spec == null) {
             return;
         }
+        retract(subscription);
         counters.recordSubscriptionRecreate();
-        OpcUaSubscription replacement = create(spec);
-        if (replacement != null) {
-            subscriptions.put(replacement, spec);
+        Created created = create(spec);
+        if (created.subscription() != null) {
+            subscriptions.put(created.subscription(), spec);
+            committed.put(created.subscription(), created.keys());
+        }
+        updateSubscriptionShape();
+    }
+
+    /** Drop a subscription's committed inventory entries. */
+    private void retract(OpcUaSubscription subscription) {
+        Set<String> keys = committed.remove(subscription);
+        if (keys != null) {
+            keys.forEach(resolvedSignals::remove);
+        }
+    }
+
+    /**
+     * Delete every server-side subscription, best-effort. Called on shutdown so the adapter does not
+     * leave monitored items running on the server after it exits.
+     */
+    public void closeAll() {
+        for (OpcUaSubscription subscription : List.copyOf(subscriptions.keySet())) {
+            subscriptions.remove(subscription);
+            retract(subscription);
+            try {
+                subscription.delete();
+            } catch (Exception e) {
+                LOGGER.debug("[{}] deleting subscription failed: {}", config.getId(), e.toString());
+            }
         }
         updateSubscriptionShape();
     }
@@ -185,5 +299,9 @@ public class SubscriptionManager {
                 ? node.getDisplayName().getText() : "";
         int nodeNs = node.getNodeId().getNamespaceIndex().intValue();
         return SignalMatching.firstMatch(specs, nsBySpec, idStr, browseName, displayName, nodeNs, matchNames);
+    }
+
+    /** One subscription build: the subscription (null on failure), its committed keys, and counts. */
+    private record Created(OpcUaSubscription subscription, Set<String> keys, int requested, int live) {
     }
 }

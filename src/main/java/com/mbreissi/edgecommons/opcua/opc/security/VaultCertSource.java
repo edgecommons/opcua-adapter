@@ -6,6 +6,7 @@ import com.mbreissi.edgecommons.credentials.TlsBundle;
 import java.security.KeyPair;
 import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
+import java.util.List;
 
 /**
  * Client identity from the edgecommons credentials vault: reads a {@link TlsBundle} secret
@@ -31,8 +32,8 @@ public final class VaultCertSource implements CertSource {
         TlsBundle bundle = credentials.getTlsBundle(secretName)
                 .orElseThrow(() -> new IllegalStateException(
                         "OPC UA client cert secret '" + secretName + "' not found in vault"));
-        X509Certificate cert = Pem.certificate(bundle.certPem());
+        List<X509Certificate> chain = Pem.certificateChain(bundle.certPem());
         PrivateKey key = Pem.privateKey(bundle.keyPem());
-        return ClientIdentity.of(cert, new KeyPair(cert.getPublicKey(), key));
+        return ClientIdentity.of(chain, new KeyPair(chain.get(0).getPublicKey(), key));
     }
 }

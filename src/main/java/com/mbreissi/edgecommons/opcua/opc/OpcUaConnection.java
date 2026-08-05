@@ -122,13 +122,44 @@ public class OpcUaConnection {
     }
 
     /**
+     * Drop the session and release the client. Best-effort and idempotent — called on shutdown so the
+     * adapter does not leave a session open on the server after it exits.
+     */
+    public void disconnect() {
+        OpcUaClient current = client;
+        connected = false;
+        if (current == null) {
+            return;
+        }
+        try {
+            current.disconnect();
+            LOGGER.info("[{}] disconnected from {}", config.getId(), config.getConnection().getEndpoint());
+        } catch (Exception e) {
+            LOGGER.debug("[{}] disconnect failed: {}", config.getId(), e.toString());
+        } finally {
+            client = null;
+        }
+    }
+
+    /**
      * Blocks, retrying every {@value #RETRY_MS} ms, until connected or a terminal failure is detected.
      * Invokes {@code onFailedAttempt} after each failed connection attempt, before retry or throw.
      */
     public OpcUaClient connect(Runnable onFailedAttempt) {
         ConnectionInfo connection = config.getConnection();
         String endpoint = connection.getEndpoint();
-        SecurityPolicy policy = parsePolicy(connection.getSecurityPolicy());
+        // Fail closed: an unrecognized or contradictory security selection is a configuration error,
+        // never a silent downgrade to an unauthenticated endpoint. Validated before the retry loop, so
+        // a typo surfaces immediately as a terminal failure rather than being retried forever.
+        SecurityPolicy policy;
+        try {
+            policy = SecurityPolicies.parsePolicy(connection.getSecurityPolicy());
+            SecurityPolicies.checkCombination(policy, SecurityPolicies.parseMode(connection.getMessageMode()));
+        } catch (IllegalArgumentException e) {
+            recordTerminalFailure();
+            LOGGER.error("[{}] refusing to connect to {}: {}", config.getId(), endpoint, e.getMessage());
+            throw new UnretryableConnectionException(config.getId(), endpoint, e);
+        }
         while (client == null) {
             OpcUaClient candidate = null;
             try {
@@ -270,15 +301,6 @@ public class OpcUaConnection {
                         .setCertificateChain(identity.chain())
                         .setCertificateValidator(validator)
                         .setIdentityProvider(IdentityProviders.from(user, credentials)));
-    }
-
-    private SecurityPolicy parsePolicy(String name) {
-        try {
-            return SecurityPolicy.valueOf(name);
-        } catch (IllegalArgumentException e) {
-            LOGGER.warn("[{}] invalid securityPolicy '{}', defaulting to None", config.getId(), name);
-            return SecurityPolicy.None;
-        }
     }
 
     static boolean isUnretryableConnectionFailure(Throwable error) {

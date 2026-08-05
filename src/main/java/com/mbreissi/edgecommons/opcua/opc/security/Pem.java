@@ -13,6 +13,7 @@ import java.security.PrivateKey;
 import java.security.Security;
 import java.security.cert.CertificateParsingException;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -32,6 +33,31 @@ public final class Pem {
     }
 
     private Pem() {
+    }
+
+    /**
+     * Every X.509 certificate in a PEM bundle, in file order (leaf first by convention).
+     *
+     * <p>A client certificate issued by an intermediate CA must present the intermediate alongside the
+     * leaf, or a server that trusts only the root cannot build a path to it and rejects the session.
+     * Reading just the first certificate silently produces a leaf-only chain that works against a
+     * flat PKI and fails against a tiered one.
+     */
+    public static List<X509Certificate> certificateChain(String pem) throws Exception {
+        List<X509Certificate> chain = new ArrayList<>();
+        JcaX509CertificateConverter converter = new JcaX509CertificateConverter().setProvider("BC");
+        try (PEMParser parser = new PEMParser(new StringReader(pem))) {
+            Object obj;
+            while ((obj = parser.readObject()) != null) {
+                if (obj instanceof X509CertificateHolder holder) {
+                    chain.add(converter.getCertificate(holder));
+                }
+            }
+        }
+        if (chain.isEmpty()) {
+            throw new IllegalArgumentException("no X.509 certificate found in PEM");
+        }
+        return chain;
     }
 
     public static X509Certificate certificate(String pem) throws Exception {

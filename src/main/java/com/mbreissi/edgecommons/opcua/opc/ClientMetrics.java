@@ -28,6 +28,8 @@ public class ClientMetrics {
     private long browseTruncatedInterval = 0L;
     private long subscriptionRecreateTotal = 0L;
     private long subscriptionRecreateInterval = 0L;
+    private long droppedSampleTotal = 0L;
+    private long droppedSampleInterval = 0L;
     private long connectionAttemptTotal = 0L;
     private long connectionAttemptInterval = 0L;
     private long connectionFailureTotal = 0L;
@@ -62,6 +64,7 @@ public class ClientMetrics {
         browseReferenceInterval = 0L;
         browseTruncatedInterval = 0L;
         subscriptionRecreateInterval = 0L;
+        droppedSampleInterval = 0L;
         connectionAttemptInterval = 0L;
         connectionFailureInterval = 0L;
         terminalFailureInterval = 0L;
@@ -118,6 +121,19 @@ public class ClientMetrics {
     public synchronized void recordSubscriptionRecreate() {
         subscriptionRecreateTotal++;
         subscriptionRecreateInterval++;
+    }
+
+    /**
+     * Count samples discarded by publisher backpressure. Deliberately an <b>operational</b> measure:
+     * {@code southbound_health} carries exactly the SOUTHBOUND.md §5 eight-measure set, and widening
+     * that set would be an org-wide contract change for every adapter in every language.
+     */
+    public synchronized void recordDroppedSamples(long count) {
+        if (count <= 0) {
+            return;
+        }
+        droppedSampleTotal += count;
+        droppedSampleInterval += count;
     }
 
     public synchronized void setSubscriptionShape(long subscriptionCount, long monitoredItemCount) {
@@ -228,6 +244,7 @@ public class ClientMetrics {
                 new Counter(browseReferenceTotal, browseReferenceInterval),
                 new Counter(browseTruncatedTotal, browseTruncatedInterval),
                 new Counter(subscriptionRecreateTotal, subscriptionRecreateInterval),
+                new Counter(droppedSampleTotal, droppedSampleInterval),
                 new Counter(connectionAttemptTotal, connectionAttemptInterval),
                 new Counter(connectionFailureTotal, connectionFailureInterval),
                 new Counter(terminalFailureTotal, terminalFailureInterval),
@@ -265,6 +282,7 @@ public class ClientMetrics {
             Counter browseReference,
             Counter browseTruncated,
             Counter subscriptionRecreate,
+            Counter droppedSample,
             Counter connectionAttempt,
             Counter connectionFailure,
             Counter terminalFailure,
@@ -287,6 +305,7 @@ public class ClientMetrics {
             retVal.add("browseReference", browseReference.toJsonObject());
             retVal.add("browseTruncated", browseTruncated.toJsonObject());
             retVal.add("subscriptionRecreate", subscriptionRecreate.toJsonObject());
+            retVal.add("droppedSample", droppedSample.toJsonObject());
             retVal.add("connectionAttempt", connectionAttempt.toJsonObject());
             retVal.add("connectionFailure", connectionFailure.toJsonObject());
             retVal.add("terminalFailure", terminalFailure.toJsonObject());
@@ -314,6 +333,7 @@ public class ClientMetrics {
             Map<String, Float> retVal = new LinkedHashMap<>();
             addMeasures(retVal, "SubscribedRead", subscribedRead);
             addMeasures(retVal, "SubscriptionRecreate", subscriptionRecreate);
+            addMeasures(retVal, "DroppedSample", droppedSample);
             retVal.put("SubscriptionCount", (float) subscriptionCount);
             retVal.put("MonitoredItemCount", (float) monitoredItemCount);
             return retVal;

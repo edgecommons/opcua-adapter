@@ -29,6 +29,11 @@ address-space cache (`AddressSpaceBrowser`), the subscriptions (`SubscriptionMan
 (`SignalUpdatePublisher`), the read/write/browse engine (`CommandService`), and the health state
 (`HealthState` → `HealthMetrics`).
 
+Signal identity is `CanonicalSignalId` — `{namespaceUri, idType, identifier}`, rendered
+`nsu=<uri>;<type>=<id>`. It is the published `signal.id`, the `writes.allow[]` key, the subscription
+inventory key, and the UNS `data` channel token's basis. **Never key on a namespace index**: it is a
+per-session handle, and an index-keyed write gate can authorize the wrong node after a server renumbers.
+
 `HealthState` is the **single** per-instance state model: it answers `sb/status`, drives
 `southbound_health`, and renders the `state` keepalive's `instances[]` entry — including the
 `CONNECTING`/`ONLINE`/`BACKOFF`/`PAUSED` token (D-SC-7). Never add a second bookkeeping path for
@@ -80,11 +85,14 @@ schema and are not redeclared here. See `docs/reference/configuration.md` and
 - `mvn verify` passes with **no live infrastructure** (the unit suite exercises the pure logic and the
   seam via fakes) and enforces the org **90% line-coverage** gate (JaCoCo `check`). The gate's
   `<excludes>` scope out **only** the live Milo driver seam + `main()` bootstrap
-  (`OpcUaAdapter`, `OpcUaConnection`, `AddressSpaceBrowser`, `SubscriptionManager`,
+  (`OpcUaAdapter`, `OpcUaConnection`, `MiloBrowseTransport`, `SubscriptionManager`,
   `SignalUpdatePublisher`, `CommandService`, `OpcUaDevice`, `opc/security/**`; `CommandRegistry`
   stays in the gate) —
   code that cannot run without a live OPC UA session and a running EdgeCommons, validated on real
-  infrastructure. Every broker-free decision stays in the gate and is unit-tested. Don't lower the gate
+  infrastructure. `AddressSpaceBrowser` is **in** the gate: the traversal reads the server through the
+  `BrowseTransport` interface, so cycles, budgets, continuation points, and partial-result accounting
+  are unit-tested against a scripted transport, and only the delegation in `MiloBrowseTransport` is
+  excluded. Every broker-free decision stays in the gate and is unit-tested. Don't lower the gate
   or widen the excludes to pass — add tests.
 - The live seam is validated by [`validation/`](validation/) against KEPServerEX (192.168.1.180) and by
   the Greengrass lab deploy (`lab-5950x`). Wire-contract or metric changes require both.

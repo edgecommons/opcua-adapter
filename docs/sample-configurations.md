@@ -12,7 +12,7 @@ task recipes see [how-to-guides.md](how-to-guides.md).
 
 > **How config reaches the adapter.** The adapter reads one JSON document from the `-c/--config`
 > source, which defaults by platform: `HOST` → `FILE`, `GREENGRASS` → `GG_CONFIG` (the deployment),
-> `KUBERNETES` → `CONFIGMAP` (a mounted directory, hot-reloaded). Adapter settings live under
+> `KUBERNETES` → `CONFIGMAP` (a mounted directory). Adapter settings live under
 > `component`; the sibling sections (`hierarchy`, `identity`, `tags`, `messaging`, `logging`,
 > `heartbeat`, `metricEmission`, `credentials`, `streaming`) are standard edgecommons sections validated
 > against the canonical [config schema](reference/configuration.md).
@@ -553,9 +553,10 @@ separate consumer of the local topics:
 
 On `--platform KUBERNETES` the config source defaults to `CONFIGMAP`: the whole ConfigMap is mounted
 as a **directory** (typically `/etc/edgecommons`) so the adapter watches the kubelet `..data` swap and
-**hot-reloads in place** on `kubectl apply` — no restart. The broker config lives in the same
-ConfigMap (in-cluster broker via Service DNS); identity comes from the Downward API, so usually **no
-CLI args** are needed.
+picks up the kubelet `..data` swap on `kubectl apply`. Adapter settings are applied at startup, so
+roll the pod (`kubectl rollout restart deployment/opcua-adapter`) for a configuration change to take
+effect. The broker config lives in the same ConfigMap (in-cluster broker via Service DNS); identity
+comes from the Downward API, so usually **no CLI args** are needed.
 
 ```yaml
 # k8s/configmap.yaml
@@ -594,7 +595,7 @@ data:
 
 | Option | Effect on runtime behavior |
 |--------|----------------------------|
-| Mounted as a **whole-volume** ConfigMap (never `subPath`) | Preserves the `..data` symlink swap so the `CONFIGMAP` source detects changes and **hot-reloads** subscriptions/timing without a pod restart. Mounting a single key via `subPath` breaks hot reload. |
+| Mounted as a **whole-volume** ConfigMap (never `subPath`) | Preserves the `..data` symlink swap so the `CONFIGMAP` source sees an updated document. Mounting a single key via `subPath` breaks that. Adapter settings still apply at startup, so roll the pod after editing the ConfigMap. |
 | `component` section identical to other platforms | The component **name** (`{ComponentName}`) is fixed by the adapter binary, so it does **not** appear in the config — only the `component` *object* (global/instances) does. The same `component`/`connection`/`subscriptions` shape works verbatim on HOST, GREENGRASS, and KUBERNETES. |
 | `messaging.local.host` = a Service DNS name | The in-cluster MQTT broker reached via Kubernetes Service DNS (`emqx.default.svc.cluster.local`). Point it at your broker Service. |
 | `metricEmission.target: "prometheus"` | Exposes `southbound_health` and the OPC UA operational metrics on the pod's metrics port (default `:9090`) for Prometheus scraping instead of publishing them — the idiomatic k8s path. |
