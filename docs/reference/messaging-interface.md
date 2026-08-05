@@ -20,7 +20,11 @@ see [explanation.md](../explanation.md); for client recipes, see the
 
 ## Envelope
 
-All messages use the EdgeCommons JSON envelope, `{header, identity, tags, body}`:
+All messages use the EdgeCommons envelope, `{header, identity, tags, body}`:
+
+> **The envelope below is shown in its JSON projection** — the canonical field names and shapes; the
+> MQTT/IPC wire encoding is the protobuf envelope (`proto/edgecommons/v1`), which round-trips this
+> projection exactly.
 
 ```jsonc
 {
