@@ -15,10 +15,12 @@ written a value back to the server.
 ## Prerequisites
 
 - **Java 25** and **Maven** (to build the adapter).
-- **Python 3.10+** with `pip install asyncua paho-mqtt` (the simulator and a small test client).
+- **Python 3.10+** with `pip install asyncua paho-mqtt` for the simulator and MQTT client. In this organization workspace, install the matching decoder with `pip install -e ../core/libs/python`.
+- [ec-uns-cmd](https://github.com/edgecommons/ec-uns-cmd) on `PATH` for bounded protobuf request/reply.
 - An **MQTT broker**. We use EMQX in Docker.
 
-Run everything from the repository root.
+Run everything from the repository root. Python here-documents use a Bash-compatible shell; in
+PowerShell, save the Python contents to a `.py` file and run `python <file>.py`.
 
 ## Step 1 — Build the adapter
 
@@ -65,69 +67,55 @@ Watch for these lines — they mean the adapter connected, browsed the server, a
 
 ## Step 5 — Watch signal updates (the data plane)
 
-In a third terminal, subscribe to the adapter's output. A short Python client keeps this dependency-free:
+The bus carries protobuf bytes. In a third terminal, decode the simulator instance's updates to a
+human-readable JSON projection:
 
 ```bash
 python - <<'PY'
-import paho.mqtt.client as mqtt, json
+import json
+import paho.mqtt.client as mqtt
+from edgecommons.messaging.message import Message
+
 c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-c.on_connect = lambda c,u,f,rc,p=None: c.subscribe("ecv1/+/+/+/data/#")
-def on_msg(c,u,m):
-    b = json.loads(m.payload)["body"]
-    s = b["samples"][0]
-    print(f'{b["signal"]["id"]:45} = {s["value"]:>10}  [{s["quality"]}]')
-c.on_message = on_msg
-c.connect("localhost", 1883); c.loop_forever()
+c.on_connect = lambda c, u, f, rc, p: c.subscribe("ecv1/tutorial-thing/opcua-adapter/sim1/data/#", qos=1)
+def on_message(c, u, m):
+    message = Message.from_bytes(m.payload)
+    print(m.topic, json.dumps(message.to_diagnostic_json(), indent=2))
+c.on_message = on_message
+c.connect("localhost", 1883)
+try:
+    c.loop_forever()
+except KeyboardInterrupt:
+    pass
+finally:
+    c.unsubscribe("ecv1/tutorial-thing/opcua-adapter/sim1/data/#")
+    c.disconnect()
 PY
 ```
-Within a second you will see a steady stream of updates, e.g.:
-```
-ns=2;s=Sine1                                  =     0.7071  [GOOD]
-ns=2;s=Sine2                                  =     0.7071  [GOOD]
-```
-That is the **data plane**: each change becomes a `SouthboundSignalUpdate` on the UNS `data` class
-(`ecv1/tutorial-thing/opcua-adapter/sim1/data/{signalPath}`). Leave this running to observe the next
-steps. (Stop it with Ctrl-C when done.)
+
+Look for `SouthboundSignalUpdate` messages containing `body.signal` and `body.samples`, including
+the changing `Counter` and sine signals. Stop the watcher with Ctrl-C when finished.
 
 ## Step 6 — Read a signal on demand
 
-Reads are the `sb/read` command verb (request/reply). Send a request naming the target `instance` and
-read `Counter` and `Setpoint`:
+Select `sim1` on the command topic and read the two signals. `--body` is a native JSON argument
+object; the tool encodes the protobuf envelope and awaits the correlated reply.
 
 ```bash
-python - <<'PY'
-import paho.mqtt.client as mqtt, json, time
-c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-got = []
-c.on_connect = lambda c,u,f,rc,p=None: c.subscribe("app/reply/1")
-c.on_message = lambda c,u,m: got.append(json.loads(m.payload))
-c.connect("localhost", 1883); c.loop_start()
-req = {"header": {"name": "sb/read", "version": "1.0", "reply_to": "app/reply/1", "correlation_id": "1"},
-       "body": {"instance": "sim1", "signals": [{"ns": 2, "signalId": "Counter"}, {"ns": 2, "signalId": "Setpoint"}]}}
-c.publish("ecv1/tutorial-thing/opcua-adapter/cmd/sb/read", json.dumps(req)); time.sleep(2)
-print(json.dumps(got[0]["body"], indent=2))
-PY
+ec-uns-cmd --broker localhost:1883 --device tutorial-thing --component opcua-adapter --instance sim1 sb/read --body '{"signals":[{"ns":2,"signalId":"Counter"},{"ns":2,"signalId":"Setpoint"}]}'
 ```
-The reply is `{ "ok": true, "result": { "id": "sim1", "reads": [ … ] } }` listing the two signals with
-their current values.
+
+The tool prints the reply's `result`, containing `id: "sim1"` and per-signal `reads` outcomes.
 
 ## Step 7 — Write a signal
 
-Set `Setpoint` to `42.5` with the `sb/write` verb. The bundled config allow-lists this signal
-(`writes.allow: ["ns=2;s=Setpoint"]`), so the write is accepted:
+The bundled configuration allows writes to `ns=2;s=Setpoint`:
 
 ```bash
-python - <<'PY'
-import paho.mqtt.client as mqtt, json
-c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2); c.connect("localhost", 1883)
-req = {"header": {"name": "sb/write", "version": "1.0"},
-       "body": {"instance": "sim1", "writes": [{"ns": 2, "signalId": "Setpoint", "value": 42.5}]}}
-c.publish("ecv1/tutorial-thing/opcua-adapter/cmd/sb/write", json.dumps(req)); c.loop()
-PY
+ec-uns-cmd --broker localhost:1883 --device tutorial-thing --component opcua-adapter --instance sim1 sb/write --body '{"writes":[{"ns":2,"signalId":"Setpoint","value":42.5}]}'
 ```
-Re-run Step 6 and you will see `Setpoint` is now `42.5` — the value travelled bus → adapter → OPC UA
-server. (Add a `reply_to`/`correlation_id` to the header, as in Step 6, to get the per-entry write
-acknowledgment.)
+
+Check the per-entry write acknowledgment, then repeat Step 6 and check that `Setpoint` is `42.5`.
 
 ## Step 8 — Clean up
 
@@ -142,8 +130,8 @@ You built and ran the adapter, watched it stream OPC UA values as `SouthboundSig
 (the data plane), and used the command surface to read and write a signal. The whole interaction
 happened over the bus — no OPC UA client code on your side.
 
-There is an automated version of exactly this flow (plaintext and secure) in
-[`validation/`](../validation/README.md).
+The [validation guide](../validation/README.md) distinguishes the usable simulator and fixtures
+from older JSON-wire clients that require repair before they can serve as current release gates.
 
 ## Next steps
 

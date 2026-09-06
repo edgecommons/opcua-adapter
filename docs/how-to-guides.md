@@ -6,6 +6,8 @@ for exhaustive option lists, see [reference/](reference/).
 
 ---
 
+Command examples use [ec-uns-cmd](https://github.com/edgecommons/ec-uns-cmd). Set the broker, device and instance to your deployment. `--body` is a native JSON argument object; the tool encodes protobuf, subscribes before publishing, and prints the reply `result` or `error` within a deadline.
+
 ## Connect to a secured server
 
 **Goal:** connect over an encrypted, mutually-authenticated channel (e.g. `Basic256Sha256` /
@@ -134,28 +136,19 @@ with the topic token is refused with `BAD_ARGS` before the verb runs. The reply 
 
 **Write** — the target's stable `signal.id` must be in the instance's `writes.allow[]` (else it comes
 back `FAILED` and raises `evt/warning/write-rejected`):
-```
-publish   topic: ecv1/<device>/opcua-adapter/cmd/sb/write
-          payload: { "header": { "name": "sb/write", "reply_to": "app/replies/write1", "correlation_id": "write1" },
-                     "body": { "instance": "kep1",
-                               "writes": [ { "namespaceUri": "urn:kepware:KEPServerEX", "signalId": "…Setpoint", "value": 42.5 } ] } }
-subscribe topic: app/replies/write1   → { "ok": true, "result": { "id": "kep1", "writes": [ … per-entry SUCCESS/FAILED … ] } }
+```bash
+ec-uns-cmd --broker localhost:1883 --device gw-01 --component opcua-adapter --instance kep1 sb/write --body '{"writes":[{"namespaceUri":"urn:kepware:KEPServerEX","signalId":"Channel1.Device1.Setpoint","value":42.5}]}'
 ```
 
 **Read** — select signals by an explicit list, or by regex `include`/`exclude` matchers (the same
 shape as `subscriptions[].include`/`exclude`) to read an ad-hoc set:
-```
-publish   topic: ecv1/<device>/opcua-adapter/cmd/sb/read
-          payload: { "header": { "name": "sb/read", "reply_to": "app/replies/42", "correlation_id": "42" },
-                     "body": { "instance": "kep1",
-                               "signals": [ { "namespaceUri": "urn:kepware:KEPServerEX", "signalId": "…Counter" } ],
-                               "include": [ { "namespaceUri": "urn:kepware:KEPServerEX", "match": "^Channel1\\.Device1\\..*" } ],
-                               "exclude": [ { "namespaceUri": "urn:kepware:KEPServerEX", "match": "\\.Diagnostics\\." } ] } }
-subscribe topic: app/replies/42   → { "ok": true, "result": { "id": "kep1", "reads": [ … ] } }
+```bash
+ec-uns-cmd --broker localhost:1883 --device gw-01 --component opcua-adapter --instance kep1 sb/read --body '{"signals":[{"namespaceUri":"urn:kepware:KEPServerEX","signalId":"Channel1.Device1.Counter"}]}'
 ```
 Address each explicit signal by `namespaceUri` (preferred, resolved at runtime) or a literal `ns`
-index, plus `signalId`. With a EdgeCommons client, use its `request()` API — it sets `header.name`,
-`reply_to`, and `correlation_id` for you. Full payload schemas are in the
+index, plus `signalId`. With an EdgeCommons client, build the message with `header.name` equal
+to the full verb (for example `sb/read`), then call `request()`; request/reply supplies `reply_to`
+and `correlation_id`. Full payload schemas are in the
 [messaging reference](reference/messaging-interface.md).
 
 ---

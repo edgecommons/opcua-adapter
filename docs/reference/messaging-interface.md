@@ -6,7 +6,7 @@ see [explanation.md](../explanation.md); for client recipes, see the
 [how-to guides](../how-to-guides.md).
 
 > **Unified Namespace (UNS).** This adapter uses the edgecommons UNS core. All topics follow
-> the grammar `ecv1/{device}/{component}/{instance}/{class}[/{channel…}]`, minted by the library's
+> the grammar `ecv1/{device}/{component}[/{instance}]/{class}[/{channel…}]`, minted by the library's
 > topic builder (`gg.instance(id).uns()`) — never hand-assembled. The site hierarchy rides the
 > top-level envelope **`identity`** element (not the topic, not `tags`).
 >
@@ -20,27 +20,27 @@ see [explanation.md](../explanation.md); for client recipes, see the
 
 ## Envelope
 
-All messages use the EdgeCommons JSON envelope, `{header, identity, tags, body}`:
+All messages use the EdgeCommons protobuf envelope, `{header, identity, tags, body}`:
 
-```jsonc
+Human-readable JSON projection of an EdgeCommons protobuf message. Normal MQTT and Greengrass IPC messaging carries protobuf bytes, not this JSON text.
+
+```json
 {
   "header": {
-    "name": "SouthboundSignalUpdate",   // message type (a cmd reply's name is the verb, e.g. "sb/read")
-    "version": "1.0",
-    "timestamp": "2026-07-03T12:00:00Z",
-    "uuid": "…",
-    "correlation_id": "…",           // present on replies (echoes the request)
-    "reply_to": "…"                  // present on requests (reply destination)
+    "name": "SouthboundSignalUpdate", "version": "1.0",
+    "timestamp": "2026-07-03T12:00:00Z", "timestamp_ms": 1783080000000,
+    "uuid": "5db5b842-6f46-48ea-a8ce-d5ff580c956c"
   },
-  "identity": {                      // stamped automatically by the library (per-instance)
-    "hier": [ { "level": "site", "value": "site1" }, { "level": "shop", "value": "shop1" },
-              { "level": "line", "value": "line1" }, { "level": "device", "value": "gw-01" } ],
-    "path": "site1/shop1/line1/gw-01",
-    "component": "opcua-adapter",
-    "instance": "kep1"
+  "identity": {
+    "hier": [{"level": "device", "value": "gw-01"}],
+    "path": "gw-01", "component": "opcua-adapter", "instance": "kep1"
   },
-  "tags": { "appId": "adapter", … },  // arbitrary business metadata only — no `thing` key
-  "body": { … }                       // per message type, below
+  "tags": {"site": "dallas"},
+  "body": {
+    "device": {"adapter": "opcua", "instance": "kep1", "endpoint": "opc.tcp://host:4840"},
+    "signal": {"id": "ns=2;s=Temperature", "name": "Temperature", "address": {"ns": 2, "signalId": "Temperature"}},
+    "samples": [{"value": 23.5, "quality": "GOOD", "qualityRaw": "0x00000000", "sourceTs": "2026-07-03T12:00:00Z", "serverTs": "2026-07-03T12:00:00Z"}]
+  }
 }
 ```
 
@@ -51,8 +51,8 @@ requires parsing the body *or* the topic.
 
 **Inbound leniency.** A command request's **verb** is the `cmd` topic's channel (after `cmd/`) and the
 envelope's `header.name` must equal it (the library inbox enforces this); the request `body` is the
-verb's argument object. A EdgeCommons client's `request()` API sets `header.name`/`reply_to`/
-`correlation_id` automatically.
+verb's argument object. Build the message with `header.name` equal to the full verb; the client's
+`request()` API supplies `reply_to` and `correlation_id`.
 
 ## Topics (UNS classes)
 
