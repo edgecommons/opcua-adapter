@@ -12,6 +12,15 @@ Signal updates ride `ecv1/{device}/{component}/{instance}/data/{signalPath}` (to
 surface is the library-owned `cmd/sb/*` inbox; write access is gated by a `writes.allow[]` allow-list
 keyed on the stable `signal.id`.
 
+## Current status
+
+Current-main review (2026-09-06): Java/Milo subscriptions, scoped southbound commands, normalized
+signal quality and per-instance health are implemented. Registry `beta` is a maturity label, not a
+fresh validation result. [Remediation PR #16](https://github.com/edgecommons/opcua-adapter/pull/16)
+remains open and its three unique commits are not main behavior. Use the current
+[tutorial](docs/tutorial.md) and [validation guide](validation/README.md); historical JSON-wire
+clients require repair before use as current conformance gates.
+
 ## 📖 Documentation
 
 Full operator/integrator docs are in **[`docs/`](docs/)**, organized by [Diátaxis](https://diataxis.fr/):

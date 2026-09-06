@@ -92,7 +92,7 @@ schema and are not redeclared here. See `docs/reference/configuration.md` and
 
 ## Org conventions this component inherits
 
-- **UNS grammar:** `ecv1/{device}/{component}/{instance}/{class}[/channel]`; reserved classes
+- **UNS grammar:** `ecv1/{device}/{component}[/{instance}]/{class}[/channel]`; reserved classes
   (`state`, `metric`, `cfg`, `log`) are library-owned — publish through `data()`/`events()`, never a
   hand-built topic or envelope.
 - **Southbound contract:** a data point is a **signal**, not a tag. Quality is normalized to
